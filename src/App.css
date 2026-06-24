@@ -1,0 +1,152 @@
+/* ====== Global Reset ====== */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Add this to App.css */
+.main-content {
+  margin-left: 250px;
+  width: calc(100% - 250px);
+  min-height: 100vh;
+  overflow: auto;
+  box-sizing: border-box;
+}
+
+@media (max-width: 992px) {
+  .main-content {
+    margin-left: 0;
+    width: 100%;
+  }
+}
+
+/* body {
+  font-family: "Poppins", sans-serif;
+  background-color: #f4f6f8;
+  color: #333;
+  min-height: 100vh;
+  display: flex;
+} */
+
+/* ====== Sidebar ====== */
+.sidebar {
+  width: 250px;
+  background-color: #1e293b;
+  color: #fff;
+  height: 100vh;
+  position: fixed;
+  top: 0;
+  left: 0;
+  padding: 30px 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.sidebar h2 {
+  font-size: 20px;
+  font-weight: 600;
+  text-align: center;
+  margin-bottom: 20px;
+  color: #f1f5f9;
+}
+
+.sidebar ul {
+  list-style: none;
+  padding: 0;
+}
+
+.sidebar ul li {
+  margin: 12px 0;
+}
+
+.sidebar ul li a {
+  text-decoration: none;
+  color: #cbd5e1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 15px;
+  border-radius: 8px;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+.sidebar ul li a:hover,
+.sidebar ul li a.active {
+  background-color: #334155;
+  color: #fff;
+}
+
+/* ====== Main Dashboard ====== */
+.dashboard {
+  margin-left: 260px;
+  padding: 25px;
+  width: calc(100% - 260px);
+}
+
+.card {
+  border: none;
+  border-radius: 15px;
+  background-color: #fff;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.card h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.card .value {
+  font-size: 24px;
+  font-weight: bold;
+  color: #0ea5e9;
+  margin-bottom: 10px;
+}
+
+.img-fluid {
+  border-radius: 10px;
+  max-height: 200px;
+  object-fit: cover;
+}
+
+/* ====== Charts ====== */
+canvas {
+  margin-top: 15px;
+}
+
+/* ====== Responsive ====== */
+@media (max-width: 992px) {
+  .sidebar {
+    position: relative;
+    width: 100%;
+    height: auto;
+    flex-direction: row;
+    justify-content: space-around;
+  }
+
+  .dashboard {
+    margin-left: 0;
+    width: 100%;
+    padding: 15px;
+  }
+
+  .sidebar ul {
+    display: flex;
+    flex-direction: row;
+    gap: 10px;
+    overflow-x: auto;
+  }
+
+  .sidebar ul li a {
+    font-size: 14px;
+    padding: 8px 10px;
+  }
+}
+

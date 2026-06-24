@@ -1,0 +1,139 @@
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(420px, 0.88fr) minmax(460px, 1.12fr);
+  background: #f7f8fc;
+  color: #172033;
+}
+
+.login-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: min(100%, 470px);
+  margin: 0 auto;
+  padding: 48px;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 72px;
+  color: #1c2740;
+  font-size: 18px;
+  font-weight: 750;
+}
+
+.login-logo {
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  color: #fff;
+  background: linear-gradient(135deg, #3683f0, #8b56ec);
+  box-shadow: 0 10px 25px rgba(86, 102, 220, 0.28);
+}
+
+.login-heading { margin-bottom: 34px; }
+.login-eyebrow { color: #6856d9 !important; font-size: 12px; font-weight: 800; letter-spacing: 0.17em; }
+.login-heading h1 { margin: 8px 0 10px; font-size: clamp(36px, 4vw, 48px); letter-spacing: -0.045em; line-height: 1.05; }
+.login-heading > p:last-child { color: #6b7280; font-size: 16px; }
+
+.login-form { display: flex; flex-direction: column; gap: 10px; }
+.login-form label { margin-top: 8px; color: #334155; font-size: 13px; font-weight: 700; }
+
+.login-input-wrap {
+  height: 54px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 0 15px;
+  border: 1px solid #dfe3eb;
+  border-radius: 12px;
+  background: #fff;
+  color: #98a1b2;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.login-input-wrap:focus-within { border-color: #6d63e8; box-shadow: 0 0 0 4px rgba(109, 99, 232, 0.1); }
+.login-input-wrap input { width: 100%; border: 0; outline: 0; background: transparent; color: #172033; font: inherit; }
+.login-input-wrap input::placeholder { color: #a8afbc; }
+
+.password-toggle {
+  display: grid;
+  place-items: center;
+  padding: 5px;
+  border: 0;
+  background: transparent;
+  color: #7c8494;
+}
+.password-toggle:hover { color: #5b52ce; border-color: transparent; }
+.password-toggle:focus-visible { outline: 2px solid #6d63e8; }
+
+.login-error { margin: 5px 0 0; color: #c83f55; font-size: 13px; }
+.login-submit {
+  height: 54px;
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(100deg, #397de7, #7d58e8);
+  color: #fff;
+  font-weight: 750;
+  box-shadow: 0 12px 25px rgba(86, 92, 211, 0.24);
+}
+.login-submit:hover { border-color: transparent; filter: brightness(1.04); transform: translateY(-1px); }
+.login-submit:disabled { cursor: wait; filter: saturate(0.8); opacity: 0.86; transform: none; }
+
+.login-spinner {
+  width: 19px;
+  height: 19px;
+  border: 2px solid rgba(255, 255, 255, 0.38);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: login-spin 0.7s linear infinite;
+}
+
+@keyframes login-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-spinner { animation-duration: 1.4s; }
+}
+
+.login-footer { margin-top: auto; padding-top: 48px; text-align: center; color: #949baa; font-size: 12px; }
+
+.login-visual {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+  padding: 9vw 8vw;
+  background:
+    linear-gradient(155deg, rgba(25, 38, 83, 0.12), rgba(39, 24, 91, 0.78)),
+    url("/images/volunteer.webp") center/cover;
+  color: #fff;
+}
+
+.login-visual::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top, rgba(16, 20, 54, 0.82), transparent 65%); }
+.login-visual-content { position: relative; z-index: 2; max-width: 600px; }
+.login-visual-content p { margin-bottom: 20px; color: #d8d5ff; font-size: 12px; font-weight: 800; letter-spacing: 0.2em; }
+.login-visual-content h2 { margin-bottom: 22px; font-size: clamp(48px, 5.2vw, 78px); line-height: 0.98; letter-spacing: -0.055em; }
+.login-visual-content span { display: block; max-width: 500px; color: rgba(255,255,255,0.78); font-size: 17px; line-height: 1.7; }
+.login-orb { position: absolute; z-index: 1; border-radius: 50%; filter: blur(2px); }
+.login-orb-one { width: 250px; height: 250px; top: -80px; right: -70px; background: rgba(122, 88, 232, 0.42); }
+.login-orb-two { width: 120px; height: 120px; top: 23%; left: 12%; background: rgba(54, 131, 240, 0.2); }
+
+@media (max-width: 860px) {
+  .login-page { grid-template-columns: 1fr; }
+  .login-panel { min-height: 100vh; padding: 32px 24px; }
+  .login-brand { margin-bottom: 52px; }
+  .login-visual { display: none; }
+}
