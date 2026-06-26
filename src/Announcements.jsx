@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   collection,
   addDoc,
@@ -6,6 +6,9 @@ import {
   deleteDoc,
   doc,
   serverTimestamp,
+  onSnapshot,
+  query,
+  orderBy,
 } from "firebase/firestore";
 import { db } from "./firebase/firebase.js";
 
@@ -186,6 +189,102 @@ export default function Announcements() {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
   };
+
+  useEffect(() => {
+    const announcementsQuery = query(
+      collection(db, "announcements"),
+      orderBy("createdAt", "desc"),
+    );
+
+    const unsubscribe = onSnapshot(
+      announcementsQuery,
+      (snapshot) => {
+        const nextPublished = {};
+        const nextReceived = {};
+        const liveCards = [];
+
+        snapshot.docs.forEach((docSnap) => {
+          const data = docSnap.data();
+          const title = data.title ?? "Untitled";
+          const category = data.category ?? "Other";
+          const matchingTemplate = DEFAULT_CARDS.find(
+            (card) => card.title === title && card.category === category,
+          );
+          const cardId = matchingTemplate
+            ? matchingTemplate.id
+            : `announcement_${docSnap.id}`;
+
+          const card = matchingTemplate
+            ? { ...matchingTemplate }
+            : {
+                id: cardId,
+                title,
+                category,
+                description: data.description ?? "",
+                requiredQuantity: Number(data.requiredQuantity ?? 0),
+                urgency: data.urgency ?? "Medium",
+                imageUrl:
+                  data.imageUrl ||
+                  CATEGORY_IMAGES[category] ||
+                  CATEGORY_IMAGES["Other"],
+                icon: CATEGORY_ICONS[category] || "📦",
+                isCustom: true,
+                firestoreId: docSnap.id,
+                isLiveAnnouncement: true,
+              };
+
+          nextPublished[cardId] = docSnap.id;
+          nextReceived[cardId] = Number(data.receivedQuantity ?? 0);
+
+          if (!liveCards.some((item) => item.id === card.id)) {
+            liveCards.push(card);
+          }
+        });
+
+        setPublished(nextPublished);
+        setReceived(nextReceived);
+
+        setCards((prevCards) => {
+          const baseCards = DEFAULT_CARDS.map((card) => ({ ...card }));
+          const keptCustomCards = prevCards.filter((card) => {
+            if (card.isCustom || card.isLiveAnnouncement) {
+              return liveCards.some(
+                (liveCard) =>
+                  liveCard.id === card.id ||
+                  liveCard.firestoreId === card.firestoreId,
+              );
+            }
+            return false;
+          });
+
+          const mergedCards = [...baseCards];
+          const seenIds = new Set(baseCards.map((card) => card.id));
+
+          keptCustomCards.forEach((card) => {
+            if (!seenIds.has(card.id)) {
+              mergedCards.push(card);
+              seenIds.add(card.id);
+            }
+          });
+
+          liveCards.forEach((card) => {
+            if (!seenIds.has(card.id)) {
+              mergedCards.push(card);
+              seenIds.add(card.id);
+            }
+          });
+
+          return mergedCards;
+        });
+      },
+      (error) => {
+        console.error("Announcements sync error:", error);
+        showToast("Could not sync with Firestore. Please refresh.", "error");
+      },
+    );
+
+    return () => unsubscribe();
+  }, []);
 
   // ── Publish a default/template card ──
   const publishCard = async (card) => {

@@ -29,6 +29,16 @@ const Donors = () => {
   const [loading, setLoading] = useState(true);
   const [assigningId, setAssigningId] = useState(null); // Row dropdown tracking state
   const [sendingReceiptId, setSendingReceiptId] = useState(null); // tracks which row is currently sending
+  const [deliveryModal, setDeliveryModal] = useState({
+    open: false,
+    donation: null,
+  });
+  const [deliveryProofFile, setDeliveryProofFile] = useState(null);
+  const [deliveryPreviewUrl, setDeliveryPreviewUrl] = useState(null);
+  const [deliveryNotes, setDeliveryNotes] = useState("");
+  const [uploadingDeliveryProof, setUploadingDeliveryProof] = useState(false);
+  const [previewImage, setPreviewImage] = useState(null);
+  const [zoomLevel, setZoomLevel] = useState(1);
 
   // ── 1. Real-time listener on "money_donations" collection ──────────────────
   useEffect(() => {
@@ -50,7 +60,7 @@ const Donors = () => {
         setMoneyData(docs);
         if (activeTab === "money") setLoading(false);
       },
-      (err) => console.error("Money tracking error:", err)
+      (err) => console.error("Money tracking error:", err),
     );
     return () => unsubMoney();
   }, [activeTab]);
@@ -70,27 +80,39 @@ const Donors = () => {
           pickupLocation: d.data().pickupLocation ?? "—",
           status: d.data().status ?? "pending",
           assignedVolunteer: d.data().assignedVolunteer ?? null,
+          assignedVolunteerId: d.data().assignedVolunteerId ?? "",
+          proofImageUrl: d.data().proofImageUrl ?? "",
+          pickedAt: d.data().pickedAt?.toDate?.() ?? null,
+          pickedByVolunteerId: d.data().pickedByVolunteerId ?? "",
+          deliveryProofImageUrl: d.data().deliveryProofImageUrl ?? "",
+          deliveryUploadedAt: d.data().deliveryUploadedAt?.toDate?.() ?? null,
+          deliveryNotes: d.data().deliveryNotes ?? "",
+          deliveredAt: d.data().deliveredAt?.toDate?.() ?? null,
+          deliveredByVolunteerId: d.data().deliveredByVolunteerId ?? "",
           createdAt: d.data().createdAt?.toDate?.() ?? null,
           receiptStatus: d.data().receiptStatus ?? null,
         }));
         setItemsData(docs);
         if (activeTab === "items") setLoading(false);
       },
-      (err) => console.error("Items tracking error:", err)
+      (err) => console.error("Items tracking error:", err),
     );
     return () => unsubItems();
   }, [activeTab]);
 
   // ── 3. Real-time listener on "volunteers" collection ───────────────────────
   useEffect(() => {
-    const unsubVolunteers = onSnapshot(collection(db, "volunteers"), (snapshot) => {
-      const list = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        uid: doc.data().uid ?? doc.id,
-        name: doc.data().name ?? "Unnamed Volunteer",
-      }));
-      setVolunteers(list);
-    });
+    const unsubVolunteers = onSnapshot(
+      collection(db, "volunteers"),
+      (snapshot) => {
+        const list = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          uid: doc.data().uid ?? doc.id,
+          name: doc.data().name ?? "Unnamed Volunteer",
+        }));
+        setVolunteers(list);
+      },
+    );
     return () => unsubVolunteers();
   }, []);
 
@@ -141,26 +163,55 @@ const Donors = () => {
     let filename = "";
 
     if (activeTab === "money") {
-      rows.push(["Donor ID", "Name", "Email", "Amount", "TXN ID", "Status", "Date"]);
+      rows.push([
+        "Donor ID",
+        "Name",
+        "Email",
+        "Amount",
+        "TXN ID",
+        "Status",
+        "Date",
+      ]);
       moneyData.forEach((donor) => {
         rows.push([
-          donor.id, donor.name, donor.email, `Rs.${donor.amount}`,
-          donor.transactionId, donor.status, donor.createdAt ? donor.createdAt.toLocaleDateString() : "—"
+          donor.id,
+          donor.name,
+          donor.email,
+          `Rs.${donor.amount}`,
+          donor.transactionId,
+          donor.status,
+          donor.createdAt ? donor.createdAt.toLocaleDateString() : "—",
         ]);
       });
       filename = "money_donations_report.csv";
     } else {
-      rows.push(["Donor ID", "Name", "Email", "Category", "Description", "Status", "Assigned Volunteer", "Date"]);
+      rows.push([
+        "Donor ID",
+        "Name",
+        "Email",
+        "Category",
+        "Description",
+        "Status",
+        "Assigned Volunteer",
+        "Date",
+      ]);
       itemsData.forEach((item) => {
         rows.push([
-          item.id, item.name, item.email, item.category, item.itemDescription,
-          item.status, item.assignedVolunteer ?? "—", item.createdAt ? item.createdAt.toLocaleDateString() : "—"
+          item.id,
+          item.name,
+          item.email,
+          item.category,
+          item.itemDescription,
+          item.status,
+          item.assignedVolunteer ?? "—",
+          item.createdAt ? item.createdAt.toLocaleDateString() : "—",
         ]);
       });
       filename = "item_supplies_report.csv";
     }
 
-    const csvContent = "data:text/csv;charset=utf-8," + rows.map((e) => e.join(",")).join("\n");
+    const csvContent =
+      "data:text/csv;charset=utf-8," + rows.map((e) => e.join(",")).join("\n");
     const link = document.createElement("a");
     link.setAttribute("href", encodeURI(csvContent));
     link.setAttribute("download", filename);
@@ -171,7 +222,17 @@ const Donors = () => {
 
   // ── 7. Build a Professional Signed PDF Receipt (returns jsPDF instance) ────
   const buildReceiptPdf = (donorId, name, email, details, type, createdAt) => {
-    const dateStr = createdAt ? createdAt.toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" }) : new Date().toLocaleDateString("en-IN", { year: "numeric", month: "long", day: "numeric" });
+    const dateStr = createdAt
+      ? createdAt.toLocaleDateString("en-IN", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        })
+      : new Date().toLocaleDateString("en-IN", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        });
     const receiptNo = `${type === "money" ? "FIN" : "ITM"}-${donorId.toString().slice(-6).toUpperCase()}`;
     const pdfDoc = new jsPDF({ unit: "pt", format: "a4" });
 
@@ -193,7 +254,11 @@ const Donors = () => {
     pdfDoc.text("Orphan Care & Resource Distribution Management", margin, 72);
 
     pdfDoc.setFontSize(9);
-    pdfDoc.text("www.hopehomefoundation.org   •   contact@hopehomefoundation.org", margin, 90);
+    pdfDoc.text(
+      "www.hopehomefoundation.org   •   contact@hopehomefoundation.org",
+      margin,
+      90,
+    );
 
     // Accent line
     pdfDoc.setFillColor(232, 124, 62); // #e87c3e accent
@@ -204,16 +269,20 @@ const Donors = () => {
     pdfDoc.setFont("times", "bold");
     pdfDoc.setFontSize(16);
     pdfDoc.text(
-      type === "money" ? "Official Donation Receipt" : "Material Donation Acknowledgement",
+      type === "money"
+        ? "Official Donation Receipt"
+        : "Material Donation Acknowledgement",
       margin,
-      150
+      150,
     );
 
     pdfDoc.setFont("times", "normal");
     pdfDoc.setFontSize(10);
     pdfDoc.setTextColor(100, 116, 139);
     pdfDoc.text(`Receipt No: ${receiptNo}`, margin, 168);
-    pdfDoc.text(`Date: ${dateStr}`, pageWidth - margin, 168, { align: "right" });
+    pdfDoc.text(`Date: ${dateStr}`, pageWidth - margin, 168, {
+      align: "right",
+    });
 
     // ── Divider ──
     pdfDoc.setDrawColor(226, 232, 240);
@@ -243,7 +312,15 @@ const Donors = () => {
     pdfDoc.setDrawColor(226, 232, 240);
     const boxTop = y;
     const boxHeight = type === "money" ? 86 : 100;
-    pdfDoc.roundedRect(margin, boxTop, pageWidth - margin * 2, boxHeight, 6, 6, "FD");
+    pdfDoc.roundedRect(
+      margin,
+      boxTop,
+      pageWidth - margin * 2,
+      boxHeight,
+      6,
+      6,
+      "FD",
+    );
 
     y += 26;
     pdfDoc.setFont("times", "bold");
@@ -260,23 +337,35 @@ const Donors = () => {
       pdfDoc.text("Amount Donated:", margin + 18, y);
       pdfDoc.setFont("times", "bold");
       pdfDoc.setTextColor(16, 163, 74);
-      pdfDoc.text(`Rs. ${parseFloat(details.amount).toLocaleString("en-IN")}`, pageWidth - margin - 18, y, { align: "right" });
+      pdfDoc.text(
+        `Rs. ${parseFloat(details.amount).toLocaleString("en-IN")}`,
+        pageWidth - margin - 18,
+        y,
+        { align: "right" },
+      );
       y += 20;
       pdfDoc.setFont("times", "normal");
       pdfDoc.setTextColor(51, 65, 85);
       pdfDoc.text("Transaction Reference:", margin + 18, y);
       pdfDoc.setFont("courier", "normal");
-      pdfDoc.text(details.transactionId, pageWidth - margin - 18, y, { align: "right" });
+      pdfDoc.text(details.transactionId, pageWidth - margin - 18, y, {
+        align: "right",
+      });
     } else {
       pdfDoc.text("Category:", margin + 18, y);
       pdfDoc.setFont("times", "bold");
-      pdfDoc.text(details.category, pageWidth - margin - 18, y, { align: "right" });
+      pdfDoc.text(details.category, pageWidth - margin - 18, y, {
+        align: "right",
+      });
       y += 20;
       pdfDoc.setFont("times", "normal");
       pdfDoc.text("Items Donated:", margin + 18, y);
       y += 18;
       pdfDoc.setFontSize(10);
-      const wrapped = pdfDoc.splitTextToSize(details.description, pageWidth - margin * 2 - 36);
+      const wrapped = pdfDoc.splitTextToSize(
+        details.description,
+        pageWidth - margin * 2 - 36,
+      );
       pdfDoc.text(wrapped, margin + 18, y);
     }
 
@@ -288,7 +377,7 @@ const Donors = () => {
     pdfDoc.setTextColor(71, 85, 105);
     const thanksLines = pdfDoc.splitTextToSize(
       "Your generosity directly transforms the lives of vulnerable children in our care. On behalf of every child we support, thank you for believing in our mission.",
-      pageWidth - margin * 2
+      pageWidth - margin * 2,
     );
     pdfDoc.text(thanksLines, margin, y);
 
@@ -301,19 +390,28 @@ const Donors = () => {
     pdfDoc.text(
       "This is a system-generated receipt and does not require a physical signature.",
       margin,
-      758
+      758,
     );
     pdfDoc.text(
       "Hope Home Foundation is a registered non-profit organisation.",
       margin,
-      772
+      772,
     );
 
     return { pdfDoc, receiptNo };
   };
 
   // ── 8. Send Receipt: generate PDF → upload to Storage → trigger email Function ──
-  const sendReceipt = async (collectionName, donorId, docId, name, email, details, type, createdAt) => {
+  const sendReceipt = async (
+    collectionName,
+    donorId,
+    docId,
+    name,
+    email,
+    details,
+    type,
+    createdAt,
+  ) => {
     if (!email || email === "—") {
       alert("This donor has no email on file — cannot send a receipt.");
       return;
@@ -322,7 +420,14 @@ const Donors = () => {
     setSendingReceiptId(docId);
     try {
       // 1. Build PDF in-browser (same as before, now styled professionally)
-      const { pdfDoc } = buildReceiptPdf(donorId, name, email, details, type, createdAt);
+      const { pdfDoc } = buildReceiptPdf(
+        donorId,
+        name,
+        email,
+        details,
+        type,
+        createdAt,
+      );
       const pdfBlob = pdfDoc.output("blob");
 
       // 2. Upload to Firebase Storage
@@ -355,19 +460,151 @@ const Donors = () => {
       alert(`Receipt is being emailed to ${email}.`);
     } catch (err) {
       console.error("Send receipt error:", err);
-      alert("Failed to send receipt. Please check Storage/Firestore rules and try again.");
+      alert(
+        "Failed to send receipt. Please check Storage/Firestore rules and try again.",
+      );
     } finally {
       setSendingReceiptId(null);
     }
   };
 
+  const markPickupComplete = async (item) => {
+    try {
+      await updateDoc(doc(db, "donations", item.docId), {
+        status: "picked",
+        pickedAt: serverTimestamp(),
+        pickedByVolunteerId: item.assignedVolunteerId || "",
+        updatedAt: serverTimestamp(),
+      });
+      alert("Pickup completed and the delivery proof step is now ready.");
+    } catch (err) {
+      console.error("Pickup update error:", err);
+      alert("Failed to update pickup status.");
+    }
+  };
+
+  const openDeliveryModal = (item) => {
+    setDeliveryModal({ open: true, donation: item });
+    setDeliveryProofFile(null);
+    setDeliveryPreviewUrl(null);
+    setDeliveryNotes(item.deliveryNotes ?? "");
+    setZoomLevel(1);
+  };
+
+  const closeDeliveryModal = () => {
+    if (deliveryPreviewUrl) {
+      URL.revokeObjectURL(deliveryPreviewUrl);
+    }
+    setDeliveryModal({ open: false, donation: null });
+    setDeliveryProofFile(null);
+    setDeliveryPreviewUrl(null);
+    setDeliveryNotes("");
+    setUploadingDeliveryProof(false);
+    setZoomLevel(1);
+  };
+
+  const handleDeliveryProofSelection = (event) => {
+    const selectedFile = event.target.files?.[0] || null;
+    if (deliveryPreviewUrl) {
+      URL.revokeObjectURL(deliveryPreviewUrl);
+    }
+    setDeliveryProofFile(selectedFile);
+    setDeliveryPreviewUrl(
+      selectedFile ? URL.createObjectURL(selectedFile) : null,
+    );
+  };
+
+  const handleDeliveryProofSubmit = async (e) => {
+    e.preventDefault();
+    if (!deliveryModal.donation || !deliveryProofFile) {
+      alert("Please select a delivery proof image before submitting.");
+      return;
+    }
+
+    setUploadingDeliveryProof(true);
+    try {
+      const donationId = deliveryModal.donation.docId;
+      const path = `delivery_proofs/${donationId}/${Date.now()}_${deliveryProofFile.name.replace(/\s+/g, "_")}`;
+      const fileRef = storageRef(storage, path);
+      await uploadBytes(fileRef, deliveryProofFile, {
+        contentType: deliveryProofFile.type || "image/jpeg",
+      });
+      const deliveryProofImageUrl = await getDownloadURL(fileRef);
+
+      await updateDoc(doc(db, "donations", donationId), {
+        deliveryProofImageUrl,
+        deliveryUploadedAt: serverTimestamp(),
+        deliveryNotes: deliveryNotes.trim(),
+        status: "delivery_uploaded",
+        updatedAt: serverTimestamp(),
+      });
+
+      await addDoc(collection(db, "mail_requests"), {
+        donorEmail: deliveryModal.donation.email,
+        donorName: deliveryModal.donation.name,
+        donationId,
+        type: "items",
+        pickupImageUrl: deliveryModal.donation.proofImageUrl || "",
+        deliveryProofImageUrl,
+        deliveryNotes: deliveryNotes.trim(),
+        status: "delivery_proof_uploaded",
+        createdAt: serverTimestamp(),
+      });
+
+      closeDeliveryModal();
+      alert("Delivery proof uploaded successfully!");
+    } catch (err) {
+      console.error("Delivery proof upload error:", err);
+      alert(`Failed to upload delivery proof. ${err?.message || "Please try again."}`);
+    } finally {
+      setUploadingDeliveryProof(false);
+    }
+  };
+
+  const markDonationDelivered = async (item) => {
+    if (!item.proofImageUrl || !item.deliveryProofImageUrl) {
+      alert(
+        "Both pickup and delivery proof images are required before marking the donation as delivered.",
+      );
+      return;
+    }
+
+    try {
+      await updateDoc(doc(db, "donations", item.docId), {
+        status: "delivered",
+        deliveredAt: serverTimestamp(),
+        deliveredByVolunteerId:
+          item.assignedVolunteerId || item.pickedByVolunteerId || "",
+        notifyDonor: true,
+        updatedAt: serverTimestamp(),
+      });
+
+      await addDoc(collection(db, "users", item.id, "notifications"), {
+        title: "Donation Delivered Successfully",
+        body: "Your donation has reached the orphanage.",
+        donationId: item.docId,
+        pickupImageUrl: item.proofImageUrl || "",
+        deliveryProofImageUrl: item.deliveryProofImageUrl || "",
+        createdAt: serverTimestamp(),
+        isRead: false,
+      });
+
+      alert("Donation marked as delivered and donor notification queued.");
+    } catch (err) {
+      console.error("Delivery confirmation error:", err);
+      alert("Failed to mark donation as delivered.");
+    }
+  };
+
   const statusBadge = (status) => {
     const map = {
-      pending: { background: "#fff3cd", color: "#856404" },
-      approved: { background: "#d4edda", color: "#155724" },
-      verified: { background: "#d4edda", color: "#155724" },
-      rejected: { background: "#f8d7da", color: "#721c24" },
-      assigned: { background: "#cce5ff", color: "#004085" },
+      pending: { background: "#fef3c7", color: "#92400e" },
+      approved: { background: "#dcfce7", color: "#166534" },
+      verified: { background: "#dcfce7", color: "#166534" },
+      rejected: { background: "#fee2e2", color: "#b91c1c" },
+      assigned: { background: "#dbeafe", color: "#1d4ed8" },
+      picked: { background: "#e0f2fe", color: "#0369a1" },
+      delivery_uploaded: { background: "#ede9fe", color: "#6d28d9" },
       delivered: { background: "#dcfce7", color: "#166534" },
     };
     const s = map[status] ?? { background: "#e2e3e5", color: "#383d41" };
@@ -384,20 +621,44 @@ const Donors = () => {
 
   return (
     <>
-      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
+      <link
+        rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"
+      />
 
       <div style={styles.pageContainer}>
         {/* Toggle Custom Navigation Controls Bar */}
         <div style={styles.tabBarContainer}>
           <button
-            style={{ ...styles.tabBtn, borderBottom: activeTab === "money" ? "3px solid #3683F0" : "3px solid transparent", color: activeTab === "money" ? "#3683F0" : "#64748B" }}
-            onClick={() => { setActiveTab("money"); setLoading(true); }}
+            style={{
+              ...styles.tabBtn,
+              borderBottom:
+                activeTab === "money"
+                  ? "3px solid #3683F0"
+                  : "3px solid transparent",
+              color: activeTab === "money" ? "#3683F0" : "#64748B",
+            }}
+            onClick={() => {
+              setActiveTab("money");
+              setLoading(true);
+            }}
           >
-            <i className="fa-solid fa-money-bill-transfer"></i> Money Donations Verification
+            <i className="fa-solid fa-money-bill-transfer"></i> Money Donations
+            Verification
           </button>
           <button
-            style={{ ...styles.tabBtn, borderBottom: activeTab === "items" ? "3px solid #3683F0" : "3px solid transparent", color: activeTab === "items" ? "#3683F0" : "#64748B" }}
-            onClick={() => { setActiveTab("items"); setLoading(true); }}
+            style={{
+              ...styles.tabBtn,
+              borderBottom:
+                activeTab === "items"
+                  ? "3px solid #3683F0"
+                  : "3px solid transparent",
+              color: activeTab === "items" ? "#3683F0" : "#64748B",
+            }}
+            onClick={() => {
+              setActiveTab("items");
+              setLoading(true);
+            }}
           >
             <i className="fa-solid fa-boxes-stacked"></i> Item Resource Pickups
           </button>
@@ -406,8 +667,14 @@ const Donors = () => {
         <div style={styles.donorsCard}>
           <div style={styles.donorsCardHeader}>
             <span style={styles.headerSpan}>
-              <i className={activeTab === "money" ? "fa fa-wallet" : "fa fa-boxes-packing"}></i>
-              {activeTab === "money" ? " Financial Settlement Operations" : " Material Allocation Audits"}
+              <i
+                className={
+                  activeTab === "money" ? "fa fa-wallet" : "fa fa-boxes-packing"
+                }
+              ></i>
+              {activeTab === "money"
+                ? " Financial Settlement Operations"
+                : " Material Allocation Audits"}
             </span>
             <button style={styles.exportBtn} onClick={exportTableToExcel}>
               <i className="fa fa-file-excel"></i> Export Active List
@@ -416,13 +683,24 @@ const Donors = () => {
 
           <div style={styles.donorsCardBody}>
             {loading ? (
-              <p style={{ textAlign: "center", padding: "40px", color: "#666" }}>
-                <i className="fa fa-spinner fa-spin"></i> Loading tracking matrices...
+              <p
+                style={{ textAlign: "center", padding: "40px", color: "#666" }}
+              >
+                <i className="fa fa-spinner fa-spin"></i> Loading tracking
+                matrices...
               </p>
             ) : activeTab === "money" ? (
               /* ================= MONEY OPERATIONS TABLES RENDERING ================= */
               moneyData.length === 0 ? (
-                <p style={{ textAlign: "center", padding: "40px", color: "#666" }}>No financial records logs found.</p>
+                <p
+                  style={{
+                    textAlign: "center",
+                    padding: "40px",
+                    color: "#666",
+                  }}
+                >
+                  No financial records logs found.
+                </p>
               ) : (
                 <table style={styles.donorsTable}>
                   <thead>
@@ -438,25 +716,74 @@ const Donors = () => {
                   </thead>
                   <tbody>
                     {moneyData.map((donor, idx) => (
-                      <tr key={donor.docId} style={idx % 2 === 1 ? styles.tableRowEven : styles.tableRow}>
-                        <td style={styles.tableCell}>{`FIN-${String(idx + 1).padStart(3, "0")}`}</td>
-                        <td style={styles.tableCell}><span style={{ fontWeight: "500" }}>{donor.name}</span></td>
-                        <td style={styles.tableCell}>{donor.email}</td>
-                        <td style={{ ...styles.tableCell, color: "#16a34a", fontWeight: "600" }}>₹{donor.amount.toLocaleString("en-IN")}</td>
-                        <td style={{ ...styles.tableCell, fontFamily: "monospace" }}>{donor.transactionId}</td>
+                      <tr
+                        key={donor.docId}
+                        style={
+                          idx % 2 === 1 ? styles.tableRowEven : styles.tableRow
+                        }
+                      >
+                        <td
+                          style={styles.tableCell}
+                        >{`FIN-${String(idx + 1).padStart(3, "0")}`}</td>
                         <td style={styles.tableCell}>
-                          <div style={{ marginBottom: "8px" }}><span style={statusBadge(donor.status)}>{donor.status}</span></div>
+                          <span style={{ fontWeight: "500" }}>
+                            {donor.name}
+                          </span>
+                        </td>
+                        <td style={styles.tableCell}>{donor.email}</td>
+                        <td
+                          style={{
+                            ...styles.tableCell,
+                            color: "#16a34a",
+                            fontWeight: "600",
+                          }}
+                        >
+                          ₹{donor.amount.toLocaleString("en-IN")}
+                        </td>
+                        <td
+                          style={{
+                            ...styles.tableCell,
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          {donor.transactionId}
+                        </td>
+                        <td style={styles.tableCell}>
+                          <div style={{ marginBottom: "8px" }}>
+                            <span style={statusBadge(donor.status)}>
+                              {donor.status}
+                            </span>
+                          </div>
                           {donor.status === "pending" && (
                             <div style={styles.actionRow}>
                               <button
-                                style={{ ...styles.actionBtn, background: "#28a745" }}
-                                onClick={() => updateStatus("money_donations", donor.docId, "verified")}
+                                style={{
+                                  ...styles.actionBtn,
+                                  background: "#28a745",
+                                }}
+                                onClick={() =>
+                                  updateStatus(
+                                    "money_donations",
+                                    donor.docId,
+                                    "verified",
+                                  )
+                                }
                               >
-                                <i className="fa fa-check"></i> Verify Settlement
+                                <i className="fa fa-check"></i> Verify
+                                Settlement
                               </button>
                               <button
-                                style={{ ...styles.actionBtn, background: "#dc3545" }}
-                                onClick={() => updateStatus("money_donations", donor.docId, "rejected")}
+                                style={{
+                                  ...styles.actionBtn,
+                                  background: "#dc3545",
+                                }}
+                                onClick={() =>
+                                  updateStatus(
+                                    "money_donations",
+                                    donor.docId,
+                                    "rejected",
+                                  )
+                                }
                               >
                                 <i className="fa fa-ban"></i> Deny
                               </button>
@@ -468,9 +795,15 @@ const Donors = () => {
                             style={{
                               ...styles.downloadBtn,
                               opacity: donor.status === "verified" ? 1 : 0.4,
-                              cursor: donor.status === "verified" ? "pointer" : "not-allowed",
+                              cursor:
+                                donor.status === "verified"
+                                  ? "pointer"
+                                  : "not-allowed",
                             }}
-                            disabled={donor.status !== "verified" || sendingReceiptId === donor.docId}
+                            disabled={
+                              donor.status !== "verified" ||
+                              sendingReceiptId === donor.docId
+                            }
                             onClick={() =>
                               sendReceipt(
                                 "money_donations",
@@ -478,122 +811,30 @@ const Donors = () => {
                                 donor.docId,
                                 donor.name,
                                 donor.email,
-                                { amount: donor.amount, transactionId: donor.transactionId },
+                                {
+                                  amount: donor.amount,
+                                  transactionId: donor.transactionId,
+                                },
                                 "money",
-                                donor.createdAt
+                                donor.createdAt,
                               )
                             }
                           >
                             {sendingReceiptId === donor.docId ? (
-                              <><i className="fa fa-spinner fa-spin"></i> Sending...</>
-                            ) : donor.receiptStatus === "sent" ? (
-                              <><i className="fa fa-check"></i> Resend Receipt</>
-                            ) : (
-                              <><i className="fa fa-paper-plane"></i> Send Receipt</>
-                            )}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )
-            ) : (
-              /* ================= MATERIAL SUPPLIES TABLE RENDERING ================= */
-              itemsData.length === 0 ? (
-                <p style={{ textAlign: "center", padding: "40px", color: "#666" }}>No logistical requirements entries tracked.</p>
-              ) : (
-                <table style={styles.donorsTable}>
-                  <thead>
-                    <tr>
-                      <th style={styles.tableHeader}>ID Ref</th>
-                      <th style={styles.tableHeader}>Supporter Name</th>
-                      <th style={styles.tableHeader}>Resource Category</th>
-                      <th style={styles.tableHeader}>Inventory Items Breakdown</th>
-                      <th style={styles.tableHeader}>Collection Location Pin</th>
-                      <th style={styles.tableHeader}>Logistics & Status</th>
-                      <th style={styles.tableHeader}>Manifest Acknowledgement</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {itemsData.map((item, idx) => (
-                      <tr key={item.docId} style={idx % 2 === 1 ? styles.tableRowEven : styles.tableRow}>
-                        <td style={styles.tableCell}>{`ITM-${String(idx + 1).padStart(3, "0")}`}</td>
-                        <td style={styles.tableCell}>{item.name}</td>
-                        <td style={styles.tableCell}><span style={styles.categoryPill}>{item.category}</span></td>
-                        <td style={{ ...styles.tableCell, textAlign: "left" }}>{item.itemDescription}</td>
-                        <td style={{ ...styles.tableCell, fontSize: "12px", color: "#64748B" }}>{item.pickupLocation}</td>
-                        <td style={styles.tableCell}>
-                          <div style={{ marginBottom: "8px" }}>
-                            <span style={statusBadge(item.status)}>
-                              {item.status === "assigned" ? `🚚 Moving: ${item.assignedVolunteer}` : item.status}
-                            </span>
-                          </div>
-                          <div style={styles.actionRow}>
-                            {item.status === "pending" && (
                               <>
-                                <button style={{ ...styles.actionBtn, background: "#28a745" }} onClick={() => updateStatus("donations", item.docId, "approved")}>
-                                  <i className="fa fa-thumbs-up"></i> Approve Request
-                                </button>
-                                <button style={{ ...styles.actionBtn, background: "#dc3545" }} onClick={() => updateStatus("donations", item.docId, "rejected")}>
-                                  <i className="fa fa-times"></i> Dismiss
-                                </button>
+                                <i className="fa fa-spinner fa-spin"></i>{" "}
+                                Sending...
+                              </>
+                            ) : donor.receiptStatus === "sent" ? (
+                              <>
+                                <i className="fa fa-check"></i> Resend Receipt
+                              </>
+                            ) : (
+                              <>
+                                <i className="fa fa-paper-plane"></i> Send
+                                Receipt
                               </>
                             )}
-                            {item.status === "approved" && (
-                              <div style={{ position: "relative", display: "inline-block" }}>
-                                <button style={{ ...styles.actionBtn, background: "#6f42c1" }} onClick={() => setAssigningId(assigningId === item.docId ? null : item.docId)}>
-                                  <i className="fa fa-truck-ramp-box"></i> Assign Logistics
-                                </button>
-                                {assigningId === item.docId && (
-                                  <div style={styles.volunteerDropdown}>
-                                    {volunteers.length === 0 ? (
-                                      <div style={styles.volunteerOption}>No available fleet couriers</div>
-                                    ) : (
-                                      volunteers.map((v) => (
-                                        <div key={v.id} style={styles.volunteerOption} onClick={() => assignVolunteer(item.docId, v)}>
-                                          {v.name}
-                                        </div>
-                                      ))
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                            {item.status === "assigned" && (
-                              <button
-                                style={{ ...styles.actionBtn, background: "#0f766e" }}
-                                onClick={() => updateStatus("donations", item.docId, "delivered")}
-                              >
-                                <i className="fa-solid fa-circle-check"></i> Mark Delivered
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                        <td style={styles.tableCell}>
-                          <button
-                            style={{ ...styles.downloadBtn, background: "#14B8A6" }}
-                            disabled={sendingReceiptId === item.docId}
-                            onClick={() =>
-                              sendReceipt(
-                                "donations",
-                                item.id,
-                                item.docId,
-                                item.name,
-                                item.email,
-                                { category: item.category, description: item.itemDescription },
-                                "items",
-                                item.createdAt
-                              )
-                            }
-                          >
-                            {sendingReceiptId === item.docId ? (
-                              <><i className="fa fa-spinner fa-spin"></i> Sending...</>
-                            ) : item.receiptStatus === "sent" ? (
-                              <><i className="fa fa-check"></i> Resend Acknowledgement</>
-                            ) : (
-                              <><i className="fa-solid fa-paper-plane"></i> Send Acknowledgement</>
-                            )}
                           </button>
                         </td>
                       </tr>
@@ -601,10 +842,420 @@ const Donors = () => {
                   </tbody>
                 </table>
               )
+            ) : /* ================= MATERIAL SUPPLIES TABLE RENDERING ================= */
+            itemsData.length === 0 ? (
+              <p
+                style={{ textAlign: "center", padding: "40px", color: "#666" }}
+              >
+                No logistical requirements entries tracked.
+              </p>
+            ) : (
+              <table style={styles.donorsTable}>
+                <thead>
+                  <tr>
+                    <th style={styles.tableHeader}>ID Ref</th>
+                    <th style={styles.tableHeader}>Supporter Name</th>
+                    <th style={styles.tableHeader}>Resource Category</th>
+                    <th style={styles.tableHeader}>
+                      Inventory Items Breakdown
+                    </th>
+                    <th style={styles.tableHeader}>Collection Location Pin</th>
+                    <th style={styles.tableHeader}>Pickup Proof</th>
+                    <th style={styles.tableHeader}>Delivery Proof</th>
+                    <th style={styles.tableHeader}>Logistics & Status</th>
+                    <th style={styles.tableHeader}>Manifest Acknowledgement</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {itemsData.map((item, idx) => (
+                    <tr
+                      key={item.docId}
+                      style={
+                        idx % 2 === 1 ? styles.tableRowEven : styles.tableRow
+                      }
+                    >
+                      <td
+                        style={styles.tableCell}
+                      >{`ITM-${String(idx + 1).padStart(3, "0")}`}</td>
+                      <td style={styles.tableCell}>{item.name}</td>
+                      <td style={styles.tableCell}>
+                        <span style={styles.categoryPill}>{item.category}</span>
+                      </td>
+                      <td style={{ ...styles.tableCell, textAlign: "left" }}>
+                        {item.itemDescription}
+                      </td>
+                      <td
+                        style={{
+                          ...styles.tableCell,
+                          fontSize: "12px",
+                          color: "#64748B",
+                        }}
+                      >
+                        {item.pickupLocation}
+                      </td>
+                      <td style={styles.tableCell}>
+                        {item.proofImageUrl ? (
+                          <button
+                            style={styles.imageButton}
+                            onClick={() =>
+                              setPreviewImage({
+                                url: item.proofImageUrl,
+                                label: "Pickup Proof",
+                              })
+                            }
+                          >
+                            <img
+                              src={item.proofImageUrl}
+                              alt="Pickup proof"
+                              style={styles.thumbnailImage}
+                            />
+                          </button>
+                        ) : (
+                          <span style={styles.emptyProofText}>
+                            Awaiting Pickup
+                          </span>
+                        )}
+                      </td>
+                      <td style={styles.tableCell}>
+                        {item.deliveryProofImageUrl ? (
+                          <button
+                            style={styles.imageButton}
+                            onClick={() =>
+                              setPreviewImage({
+                                url: item.deliveryProofImageUrl,
+                                label: "Delivery Proof",
+                              })
+                            }
+                          >
+                            <img
+                              src={item.deliveryProofImageUrl}
+                              alt="Delivery proof"
+                              style={styles.thumbnailImage}
+                            />
+                          </button>
+                        ) : (
+                          <span style={styles.emptyProofText}>
+                            Pending Delivery
+                          </span>
+                        )}
+                      </td>
+                      <td style={styles.tableCell}>
+                        <div style={{ marginBottom: "8px" }}>
+                          <span style={statusBadge(item.status)}>
+                            {item.status === "assigned"
+                              ? `🚚 Moving: ${item.assignedVolunteer}`
+                              : item.status}
+                          </span>
+                        </div>
+                        <div style={styles.actionRow}>
+                          {item.status === "pending" && (
+                            <>
+                              <button
+                                style={{
+                                  ...styles.actionBtn,
+                                  background: "#28a745",
+                                }}
+                                onClick={() =>
+                                  updateStatus(
+                                    "donations",
+                                    item.docId,
+                                    "approved",
+                                  )
+                                }
+                              >
+                                <i className="fa fa-thumbs-up"></i> Approve
+                                Request
+                              </button>
+                              <button
+                                style={{
+                                  ...styles.actionBtn,
+                                  background: "#dc3545",
+                                }}
+                                onClick={() =>
+                                  updateStatus(
+                                    "donations",
+                                    item.docId,
+                                    "rejected",
+                                  )
+                                }
+                              >
+                                <i className="fa fa-times"></i> Dismiss
+                              </button>
+                            </>
+                          )}
+                          {item.status === "approved" && (
+                            <div
+                              style={{
+                                position: "relative",
+                                display: "inline-block",
+                              }}
+                            >
+                              <button
+                                style={{
+                                  ...styles.actionBtn,
+                                  background: "#6f42c1",
+                                }}
+                                onClick={() =>
+                                  setAssigningId(
+                                    assigningId === item.docId
+                                      ? null
+                                      : item.docId,
+                                  )
+                                }
+                              >
+                                <i className="fa fa-truck-ramp-box"></i> Assign
+                                Logistics
+                              </button>
+                              {assigningId === item.docId && (
+                                <div style={styles.volunteerDropdown}>
+                                  {volunteers.length === 0 ? (
+                                    <div style={styles.volunteerOption}>
+                                      No available fleet couriers
+                                    </div>
+                                  ) : (
+                                    volunteers.map((v) => (
+                                      <div
+                                        key={v.id}
+                                        style={styles.volunteerOption}
+                                        onClick={() =>
+                                          assignVolunteer(item.docId, v)
+                                        }
+                                      >
+                                        {v.name}
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {item.status === "assigned" && (
+                            <button
+                              style={{
+                                ...styles.actionBtn,
+                                background: "#0f766e",
+                              }}
+                              onClick={() => markPickupComplete(item)}
+                            >
+                              <i className="fa-solid fa-circle-check"></i> Mark
+                              Pickup Complete
+                            </button>
+                          )}
+                          {(item.status === "picked" ||
+                            item.status === "delivery_uploaded") && (
+                            <button
+                              style={{
+                                ...styles.actionBtn,
+                                background:
+                                  item.status === "picked"
+                                    ? "#7c3aed"
+                                    : "#16a34a",
+                                opacity:
+                                  item.status === "picked"
+                                    ? 1
+                                    : !item.proofImageUrl ||
+                                        !item.deliveryProofImageUrl
+                                      ? 0.55
+                                      : 1,
+                              }}
+                              disabled={
+                                item.status === "delivery_uploaded" &&
+                                (!item.proofImageUrl ||
+                                  !item.deliveryProofImageUrl)
+                              }
+                              onClick={() =>
+                                item.status === "picked"
+                                  ? openDeliveryModal(item)
+                                  : markDonationDelivered(item)
+                              }
+                            >
+                              <i className="fa-solid fa-truck-fast"></i>{" "}
+                              {item.status === "picked"
+                                ? "Mark As Delivered"
+                                : "Mark Delivered"}
+                            </button>
+                          )}
+                          {item.status === "delivered" && (
+                            <button
+                              style={{
+                                ...styles.actionBtn,
+                                background: "#15803d",
+                              }}
+                              onClick={() =>
+                                window.open(
+                                  `/donor-tracking/${item.docId}`,
+                                  "_blank",
+                                )
+                              }
+                            >
+                              Track Donation
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      <td style={styles.tableCell}>
+                        <button
+                          style={{
+                            ...styles.downloadBtn,
+                            background: "#14B8A6",
+                          }}
+                          disabled={sendingReceiptId === item.docId}
+                          onClick={() =>
+                            sendReceipt(
+                              "donations",
+                              item.id,
+                              item.docId,
+                              item.name,
+                              item.email,
+                              {
+                                category: item.category,
+                                description: item.itemDescription,
+                              },
+                              "items",
+                              item.createdAt,
+                            )
+                          }
+                        >
+                          {sendingReceiptId === item.docId ? (
+                            <>
+                              <i className="fa fa-spinner fa-spin"></i>{" "}
+                              Sending...
+                            </>
+                          ) : item.receiptStatus === "sent" ? (
+                            <>
+                              <i className="fa fa-check"></i> Resend
+                              Acknowledgement
+                            </>
+                          ) : (
+                            <>
+                              <i className="fa-solid fa-paper-plane"></i> Send
+                              Acknowledgement
+                            </>
+                          )}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
         </div>
       </div>
+
+      {previewImage && (
+        <div
+          style={styles.previewOverlay}
+          onClick={() => setPreviewImage(null)}
+        >
+          <div style={styles.previewModal} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.previewHeader}>
+              <span style={styles.previewTitle}>{previewImage.label}</span>
+              <div style={styles.previewActions}>
+                <button
+                  style={styles.zoomButton}
+                  onClick={() =>
+                    setZoomLevel((prev) => Math.max(1, prev - 0.25))
+                  }
+                >
+                  -
+                </button>
+                <span
+                  style={{
+                    fontWeight: 600,
+                    minWidth: "48px",
+                    textAlign: "center",
+                  }}
+                >
+                  {zoomLevel.toFixed(2)}x
+                </span>
+                <button
+                  style={styles.zoomButton}
+                  onClick={() => setZoomLevel((prev) => prev + 0.25)}
+                >
+                  +
+                </button>
+                <button
+                  style={styles.closePreviewButton}
+                  onClick={() => setPreviewImage(null)}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+            <div style={styles.previewBody}>
+              <img
+                src={previewImage.url}
+                alt={previewImage.label}
+                style={{
+                  ...styles.previewImage,
+                  transform: `scale(${zoomLevel})`,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deliveryModal.open && deliveryModal.donation && (
+        <div style={styles.previewOverlay} onClick={closeDeliveryModal}>
+          <div
+            style={styles.deliveryModal}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={styles.previewHeader}>
+              <span style={styles.previewTitle}>Upload Delivery Proof</span>
+              <button
+                style={styles.closePreviewButton}
+                onClick={closeDeliveryModal}
+              >
+                ×
+              </button>
+            </div>
+            <form
+              onSubmit={handleDeliveryProofSubmit}
+              style={styles.deliveryForm}
+            >
+              <label style={styles.uploadLabel}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleDeliveryProofSelection}
+                  style={styles.fileInput}
+                />
+                <span style={styles.uploadText}>
+                  Choose delivery proof image
+                </span>
+              </label>
+              {deliveryPreviewUrl && (
+                <div style={styles.previewBox}>
+                  <img
+                    src={deliveryPreviewUrl}
+                    alt="Selected delivery proof"
+                    style={styles.selectedPreviewImage}
+                  />
+                </div>
+              )}
+              <textarea
+                value={deliveryNotes}
+                onChange={(e) => setDeliveryNotes(e.target.value)}
+                placeholder="Optional delivery notes"
+                style={styles.notesInput}
+                rows={4}
+              />
+              <button
+                type="submit"
+                style={styles.submitDeliveryButton}
+                disabled={uploadingDeliveryProof}
+              >
+                {uploadingDeliveryProof
+                  ? "Uploading..."
+                  : "Submit Delivery Proof"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 };
@@ -622,7 +1273,7 @@ const styles = {
     display: "flex",
     gap: "20px",
     marginBottom: "24px",
-    borderBottom: "1px solid #E2E8F0"
+    borderBottom: "1px solid #E2E8F0",
   },
   tabBtn: {
     background: "none",
@@ -634,7 +1285,7 @@ const styles = {
     transition: "all 0.2s ease",
     display: "flex",
     alignItems: "center",
-    gap: "8px"
+    gap: "8px",
   },
   donorsCard: {
     background: "white",
@@ -736,7 +1387,150 @@ const styles = {
     padding: "3px 8px",
     borderRadius: "6px",
     fontSize: "11px",
-    fontWeight: "600"
+    fontWeight: "600",
+  },
+  imageButton: {
+    background: "none",
+    border: "none",
+    padding: 0,
+    cursor: "pointer",
+  },
+  thumbnailImage: {
+    width: "80px",
+    height: "80px",
+    objectFit: "cover",
+    borderRadius: "10px",
+    border: "1px solid #E2E8F0",
+  },
+  emptyProofText: {
+    color: "#94a3b8",
+    fontSize: "12px",
+    fontStyle: "italic",
+  },
+  previewOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(15, 23, 42, 0.72)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 2000,
+    padding: "20px",
+  },
+  previewModal: {
+    width: "min(92vw, 760px)",
+    background: "white",
+    borderRadius: "16px",
+    padding: "18px",
+    boxShadow: "0 20px 48px rgba(0,0,0,0.28)",
+  },
+  deliveryModal: {
+    width: "min(92vw, 520px)",
+    background: "white",
+    borderRadius: "16px",
+    padding: "18px",
+    boxShadow: "0 20px 48px rgba(0,0,0,0.28)",
+  },
+  previewHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: "12px",
+  },
+  previewTitle: {
+    fontSize: "16px",
+    fontWeight: "700",
+    color: "#0f172a",
+  },
+  previewActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+  },
+  zoomButton: {
+    border: "1px solid #cbd5e1",
+    background: "#f8fafc",
+    borderRadius: "6px",
+    width: "32px",
+    height: "32px",
+    cursor: "pointer",
+  },
+  closePreviewButton: {
+    border: "none",
+    background: "#ef4444",
+    color: "white",
+    borderRadius: "999px",
+    width: "32px",
+    height: "32px",
+    cursor: "pointer",
+    fontSize: "18px",
+  },
+  previewBody: {
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    maxHeight: "72vh",
+    overflow: "auto",
+    background: "#f8fafc",
+    borderRadius: "12px",
+    padding: "12px",
+  },
+  previewImage: {
+    maxWidth: "100%",
+    maxHeight: "68vh",
+    objectFit: "contain",
+    transition: "transform 0.2s ease",
+  },
+  deliveryForm: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+  },
+  uploadLabel: {
+    border: "2px dashed #cbd5e1",
+    borderRadius: "10px",
+    padding: "20px",
+    textAlign: "center",
+    cursor: "pointer",
+    background: "#f8fafc",
+  },
+  fileInput: {
+    display: "none",
+  },
+  uploadText: {
+    color: "#2563eb",
+    fontWeight: "600",
+  },
+  previewBox: {
+    border: "1px solid #e2e8f0",
+    borderRadius: "10px",
+    padding: "10px",
+    background: "#f8fafc",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  selectedPreviewImage: {
+    maxWidth: "100%",
+    maxHeight: "220px",
+    objectFit: "contain",
+    borderRadius: "10px",
+  },
+  notesInput: {
+    border: "1px solid #cbd5e1",
+    borderRadius: "10px",
+    padding: "12px",
+    resize: "vertical",
+    minHeight: "96px",
+  },
+  submitDeliveryButton: {
+    border: "none",
+    borderRadius: "10px",
+    padding: "10px 14px",
+    background: "#7c3aed",
+    color: "white",
+    cursor: "pointer",
+    fontWeight: "600",
   },
   volunteerDropdown: {
     position: "absolute",
@@ -757,7 +1551,7 @@ const styles = {
     cursor: "pointer",
     textAlign: "left",
     background: "white",
-    borderBottom: "1px solid #F1F5F9"
+    borderBottom: "1px solid #F1F5F9",
   },
 };
 

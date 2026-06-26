@@ -184,10 +184,6 @@ const Reports = () => {
               <p style={styles.eyebrow}>Overview</p>
               <h1 style={styles.heading}>Donation Reports</h1>
             </div>
-            <span style={styles.liveBadge}>
-              <i className="fa-solid fa-circle" style={{ fontSize: 10 }}></i>
-              Live Firebase data
-            </span>
           </div>
 
           {loading ? (
@@ -341,17 +337,6 @@ const styles = {
     color: "#0F172A",
     fontSize: "28px",
     fontWeight: 700,
-  },
-  liveBadge: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "8px",
-    color: "#16A34A",
-    background: "#ECFDF3",
-    padding: "8px 12px",
-    borderRadius: "999px",
-    fontSize: "13px",
-    fontWeight: 600,
   },
   loader: {
     padding: "40px 0",

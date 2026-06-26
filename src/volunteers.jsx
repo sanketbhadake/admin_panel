@@ -153,7 +153,6 @@ const Volunteers = () => {
           </div>
         )}
 
-        {/* Both elements are now fully caught inside the stack configuration container layout */}
         <div style={styles.dashboardVerticalStack}>
           {/* TOP MODULE: EXPANDED REGISTRATION INTERFACE */}
           <div style={styles.donorsCard}>
@@ -361,7 +360,7 @@ const Volunteers = () => {
 const styles = {
   pageContainer: {
     marginLeft: "250px",
-    padding: "40px 30px",
+    padding: "24px 20px",
     width: "calc(100% - 250px)",
     minHeight: "100vh",
     background: "#F8FAFC",
@@ -371,7 +370,7 @@ const styles = {
   dashboardVerticalStack: {
     display: "flex",
     flexDirection: "column",
-    gap: "32px",
+    gap: "20px",
     width: "100%",
   },
   donorsCard: {
@@ -398,10 +397,10 @@ const styles = {
     gap: "10px",
   },
   donorsCardBodyForm: {
-    padding: "24px 25px",
+    padding: "20px 22px 22px",
   },
   donorsCardBody: {
-    padding: "20px",
+    padding: "16px 18px 18px",
   },
   tableResponsiveWrapper: {
     width: "100%",
@@ -410,7 +409,7 @@ const styles = {
   formGridElement: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-    gap: "20px",
+    gap: "16px",
     alignItems: "end",
     width: "100%",
   },
@@ -451,11 +450,11 @@ const styles = {
   },
   buttonWrapper: {
     display: "flex",
-    justifyContent: "flex-end",
-    marginTop: "8px",
+    justifyContent: "flex-start",
+    marginTop: "0",
   },
   actionAddBtn: {
-    padding: "12px 28px",
+    padding: "10px 20px",
     background: "linear-gradient(90deg, #3683F0, #8B56EC)",
     color: "white",
     border: "none",

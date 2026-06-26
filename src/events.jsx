@@ -34,7 +34,6 @@ const Events = () => {
     "Other",
   ];
 
-  // Fetch events from Firebase
   useEffect(() => {
     const db = getFirestore();
     const q = query(
@@ -81,10 +80,6 @@ const Events = () => {
     });
   };
 
-  // ── Notify the single requester via FCM (push only) ───────────────────────
-  // Writes a doc to "targeted_notifications" — a Cloud Function
-  // (sendEventDecisionNotification) listens here, looks up this ONE donor's
-  // fcmToken by userId, and sends just to them (not a broadcast).
   const notifyRequester = async (event, decision, reason = "") => {
     if (!event?.userId) {
       console.warn("No userId on this event request — skipping notification.");
@@ -112,8 +107,6 @@ const Events = () => {
         createdAt: serverTimestamp(),
       });
     } catch (err) {
-      // Don't block the approve/reject flow if the notification write fails —
-      // just log it, since the status update itself already succeeded.
       console.error("Failed to queue requester notification:", err);
     }
   };
@@ -130,11 +123,7 @@ const Events = () => {
       });
 
       const event = events.find((e) => e.id === eventId);
-      showNotification(
-        `Event "${event.title}" has been approved successfully!`,
-      );
-
-      // Notify just this requester
+      showNotification(`Event "${event.title}" has been approved successfully!`);
       await notifyRequester(event, "approved");
     } catch (error) {
       console.error("Error approving event:", error);
@@ -174,12 +163,8 @@ const Events = () => {
       });
 
       const event = events.find((e) => e.id === eventId);
-      showNotification(
-        `Event "${event.title}" has been rejected. Reason: "${reason}"`,
-      );
+      showNotification(`Event "${event.title}" has been rejected. Reason: "${reason}"`);
       closeRejectModal();
-
-      // Notify just this requester
       await notifyRequester(event, "rejected", reason);
     } catch (error) {
       console.error("Error rejecting event:", error);
@@ -193,11 +178,9 @@ const Events = () => {
   if (loading) {
     return (
       <div style={styles.mainContent}>
-        <div style={styles.container}>
-          <div style={styles.loadingContainer}>
-            <div style={styles.spinner}></div>
-            <p>Loading events...</p>
-          </div>
+        <div style={styles.loadingContainer}>
+          <div style={styles.spinner}></div>
+          <p style={{ marginTop: "16px", color: "#64748b", fontWeight: "500" }}>Loading orchestration panels...</p>
         </div>
       </div>
     );
@@ -205,281 +188,228 @@ const Events = () => {
 
   return (
     <>
-      <link
-        rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"
-      />
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css" />
 
       <div style={styles.mainContent}>
-        <div style={styles.container}>
-          <h1 style={styles.heading}>
-            <i className="fas fa-calendar-alt" style={{ marginRight: "10px" }}></i>
-            Events Management
-          </h1>
-
-          {notification.show && (
-            <div style={styles.notification}>
-              <i className="fas fa-info-circle" style={{ marginRight: "8px" }}></i>
-              {notification.message}
-            </div>
-          )}
-
-          {/* ── PENDING EVENTS ── */}
-          <div style={styles.section}>
-            <h2 style={styles.subHeading}>
-              <i className="fas fa-clock" style={{ marginRight: "8px", color: "#ff9800" }}></i>
-              Pending Event Requests
-              <span style={styles.badge}>{pendingEvents.length}</span>
-            </h2>
-
-            <div style={styles.pendingList}>
-              {pendingEvents.map((event) => (
-                <div key={event.id} style={styles.eventCard}>
-                  {/* Card Header */}
-                  <div style={styles.cardHeader}>
-                    <div>
-                      <h3 style={styles.eventTitle}>{event.title}</h3>
-                      <span style={styles.eventType}>
-                        {event.eventType === "Celebration" && "🎂"}
-                        {event.eventType === "Donation Drive" && "🎁"}
-                        {event.eventType === "Awareness" && "📣"}{" "}
-                        {event.eventType}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Card Body */}
-                  <div style={styles.cardBody}>
-                    <p style={styles.description}>
-                      {event.description || "No description provided"}
-                    </p>
-
-                    <div style={styles.eventDetails}>
-                      {/* Requested By — name + email */}
-                      <div style={styles.detailItem}>
-                        <i className="fas fa-user" style={styles.icon}></i>
-                        <strong>Requested by:&nbsp;</strong>
-                        <span style={styles.nameText}>
-                          {event.userName || "—"}
-                        </span>
-                        {event.userEmail && (
-                          <span style={styles.emailChip}>
-                            {event.userEmail}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Event Date */}
-                      <div style={styles.detailItem}>
-                        <i className="fas fa-calendar" style={styles.icon}></i>
-                        <strong>Event Date:&nbsp;</strong>
-                        {formatDate(event.eventDate)}
-                      </div>
-
-                      {/* Time Slot */}
-                      <div style={styles.detailItem}>
-                        <i className="fas fa-clock" style={styles.icon}></i>
-                        <strong>Time Slot:&nbsp;</strong>
-                        {event.timeSlot ? (
-                          <span style={styles.timeSlotChip}>
-                            <i className="fas fa-hourglass-half" style={{ marginRight: "5px", fontSize: "11px" }}></i>
-                            {event.timeSlot}
-                          </span>
-                        ) : (
-                          <span style={{ color: "#aaa" }}>Not specified</span>
-                        )}
-                      </div>
-
-                      {/* Submitted on */}
-                      <div style={styles.detailItem}>
-                        <i className="fas fa-paper-plane" style={styles.icon}></i>
-                        <strong>Submitted:&nbsp;</strong>
-                        {formatDate(event.createdAt)}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Actions */}
-                  <div style={styles.actions}>
-                    <button
-                      style={styles.acceptButton}
-                      onClick={() => acceptEvent(event.id)}
-                      onMouseEnter={(e) => (e.target.style.backgroundColor = "#45a049")}
-                      onMouseLeave={(e) => (e.target.style.backgroundColor = "#4caf50")}
-                    >
-                      <i className="fas fa-check" style={{ marginRight: "6px" }}></i>
-                      Approve
-                    </button>
-                    <button
-                      style={styles.rejectButton}
-                      onClick={() => openRejectModal(event.id)}
-                      onMouseEnter={(e) => (e.target.style.backgroundColor = "#da190b")}
-                      onMouseLeave={(e) => (e.target.style.backgroundColor = "#f44336")}
-                    >
-                      <i className="fas fa-times" style={{ marginRight: "6px" }}></i>
-                      Reject
-                    </button>
-                  </div>
-                </div>
-              ))}
-
-              {pendingEvents.length === 0 && (
-                <div style={styles.noEvents}>
-                  <i className="fas fa-check-circle" style={{ fontSize: "48px", color: "#4caf50", marginBottom: "10px" }}></i>
-                  <p>No pending event requests</p>
-                </div>
-              )}
-            </div>
+        {/* Header Unit */}
+        <div style={styles.headerDashboard}>
+          <div>
+            <h1 style={styles.headingMain}>Events Management</h1>
+            <p style={styles.subtitleMain}>Approve, filter, and moderate upcoming NGO foundation drives</p>
           </div>
+          <div style={styles.totalBadgePanel}>
+            <i className="fas fa-calendar-check" style={{ color: "#3b82f6" }}></i>
+            <span>{events.length} Total Logs</span>
+          </div>
+        </div>
 
-          {/* ── PROCESSED EVENTS TABLE ── */}
-          <div style={styles.section}>
-            <h2 style={styles.subHeading}>
-              <i className="fas fa-list" style={{ marginRight: "8px", color: "#2196f3" }}></i>
-              Processed Events
-            </h2>
+        {notification.show && (
+          <div style={styles.notification}>
+            <i className="fas fa-sparkles" style={{ marginRight: "10px", fontSize: "16px" }}></i>
+            {notification.message}
+          </div>
+        )}
 
-            <div style={styles.tableContainer}>
-              <table style={styles.table}>
-                <thead>
-                  <tr>
-                    <th style={styles.th}>Event Name</th>
-                    <th style={styles.th}>Type</th>
-                    <th style={styles.th}>Event Date</th>
-                    <th style={styles.th}>Time Slot</th>
-                    <th style={styles.th}>Requested By</th>
-                    <th style={styles.th}>Status</th>
-                    <th style={styles.th}>Rejection Reason</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {processedEvents.map((event) => (
-                    <tr key={event.id} style={styles.tableRow}>
-                      <td style={styles.td}>
-                        <strong>{event.title}</strong>
-                      </td>
-                      <td style={styles.td}>
-                        <span style={styles.typeChip}>
-                          {event.eventType === "Celebration" && "🎂"}
-                          {event.eventType === "Donation Drive" && "🎁"}
-                          {event.eventType === "Awareness" && "📣"}{" "}
-                          {event.eventType}
-                        </span>
-                      </td>
-                      <td style={styles.td}>{formatDate(event.eventDate)}</td>
+        {/* ── PENDING GRID VIEW ── */}
+        <div style={styles.sectionArea}>
+          <h2 style={styles.subHeading}>
+            <span style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <i className="fas fa-hourglass-start" style={{ color: "#f59e0b" }}></i>
+              Pending Verification Requests
+            </span>
+            <span style={styles.badgeOrange}>{pendingEvents.length} Tasks</span>
+          </h2>
 
-                      {/* Time Slot column */}
-                      <td style={styles.td}>
-                        {event.timeSlot ? (
-                          <span style={styles.timeSlotChip}>
-                            <i className="fas fa-hourglass-half" style={{ marginRight: "5px", fontSize: "11px" }}></i>
-                            {event.timeSlot}
-                          </span>
-                        ) : (
-                          <span style={{ color: "#bbb" }}>—</span>
-                        )}
-                      </td>
+          <div style={styles.pendingGrid}>
+            {pendingEvents.map((event) => (
+              <div key={event.id} style={styles.premiumCard}>
+                <div style={styles.cardAccentBar}></div>
+                <div style={styles.premiumCardBody}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "14px" }}>
+                    <h3 style={styles.eventTitle}>{event.title}</h3>
+                    <span style={styles.eventTypeTag}>
+                      {event.eventType === "Celebration" && "🎂"}
+                      {event.eventType === "Donation Drive" && "🎁"}
+                      {event.eventType === "Awareness" && "📣"}{" "}
+                      {event.eventType}
+                    </span>
+                  </div>
 
-                      {/* Requested By — name + email stacked */}
-                      <td style={styles.td}>
-                        <div style={styles.requesterCell}>
-                          <span style={styles.requesterName}>
-                            <i className="fas fa-user-circle" style={{ marginRight: "5px", color: "#667eea" }}></i>
-                            {event.userName || "—"}
-                          </span>
-                          {event.userEmail && (
-                            <span style={styles.requesterEmail}>
-                              {event.userEmail}
-                            </span>
-                          )}
+                  <p style={styles.descriptionText}>
+                    {event.description || "No description logged by the organizer."}
+                  </p>
+
+                  <div style={styles.metaInformationList}>
+                    <div style={styles.metaRow}>
+                      <i className="fas fa-circle-user" style={{ color: "#6366f1" }}></i>
+                      <span style={{ color: "#1e293b", fontWeight: "600" }}>{event.userName || "—"}</span>
+                      {event.userEmail && <span style={styles.emailBadgeChip}>{event.userEmail}</span>}
+                    </div>
+
+                    <div style={styles.gridDetailsTwoColumn}>
+                      <div style={styles.metaRow}>
+                        <i className="fas fa-calendar-day" style={{ color: "#009966" }}></i>
+                        <span>{formatDate(event.eventDate)}</span>
+                      </div>
+                      <div style={styles.metaRow}>
+                        <i className="fas fa-clock" style={{ color: "#ef4444" }}></i>
+                        {event.timeSlot ? <span style={styles.timeSlotPill}>{event.timeSlot}</span> : <span style={{ color: "#94a3b8" }}>N/A</span>}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={styles.cardActionsRow}>
+                  <button style={styles.actionApproveButton} onClick={() => acceptEvent(event.id)}>
+                    <i className="fas fa-check-double"></i> Approve
+                  </button>
+                  <button style={styles.actionRejectButton} onClick={() => openRejectModal(event.id)}>
+                    <i className="fas fa-ban"></i> Reject
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {pendingEvents.length === 0 && (
+              <div style={styles.cleanEmptyState}>
+                <i className="fas fa-circle-check" style={{ fontSize: "52px", color: "#10b981", marginBottom: "12px" }}></i>
+                <p style={{ margin: 0, fontWeight: "600", color: "#1e293b" }}>All Caught Up!</p>
+                <p style={{ margin: "4px 0 0 0", color: "#64748b", fontSize: "14px" }}>No outstanding event authorizations pending.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── PROCESSED REGISTRY TABLE ── */}
+        <div style={styles.sectionArea}>
+          <h2 style={styles.subHeading}>
+            <span style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <i className="fas fa-box-archive" style={{ color: "#3b82f6" }}></i>
+              Processed Archive History
+            </span>
+          </h2>
+
+          <div style={styles.premiumTableWrapper}>
+            <table style={styles.premiumTable}>
+              <thead>
+                <tr>
+                  <th style={styles.pTh}>Event Details</th>
+                  <th style={styles.pTh}>Classification</th>
+                  <th style={styles.pTh}>Date Scheduled</th>
+                  <th style={styles.pTh}>Time Slot</th>
+                  <th style={styles.pTh}>Submitted By</th>
+                  <th style={styles.pTh}>Status Badge</th>
+                  <th style={styles.pTh}>Resolution Remarks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {processedEvents.map((event) => (
+                  <tr key={event.id} style={styles.pTableRow}>
+                    <td style={styles.pTd}>
+                      <span style={{ fontWeight: "600", color: "#1e293b" }}>{event.title}</span>
+                    </td>
+                    <td style={styles.pTd}>
+                      <span style={styles.tableCategoryChip}>{event.eventType}</span>
+                    </td>
+                    <td style={styles.pTd}>{formatDate(event.eventDate)}</td>
+                    <td style={styles.pTd}>
+                      {event.timeSlot ? <span style={styles.timeSlotPill}>{event.timeSlot}</span> : <span style={{ color: "#94a3b8" }}>—</span>}
+                    </td>
+                    <td style={styles.pTd}>
+                      <div style={{ display: "flex", flexDirection: "column" }}>
+                        <span style={{ fontWeight: "500", color: "#334155", fontSize: "13px" }}>{event.userName || "—"}</span>
+                        <span style={{ color: "#64748b", fontSize: "11px" }}>{event.userEmail}</span>
+                      </div>
+                    </td>
+                    <td style={styles.pTd}>
+                      <span
+                        style={{
+                          ...styles.premiumStatusBadge,
+                          backgroundColor: event.status === "approved" ? "#ecfdf5" : "#fef2f2",
+                          color: event.status === "approved" ? "#065f46" : "#991b1b",
+                          border: event.status === "approved" ? "1px solid #a7f3d0" : "1px solid #fca5a5",
+                        }}
+                      >
+                        <span style={{ ...styles.dotIndicator, backgroundColor: event.status === "approved" ? "#10b981" : "#ef4444" }}></span>
+                        {event.status.toUpperCase()}
+                      </span>
+                    </td>
+                    <td style={styles.pTd}>
+                      {event.status === "rejected" ? (
+                        <div style={styles.rejectionTextContainer}>
+                          <i className="fas fa-message" style={{ fontSize: "11px", marginTop: "3px" }}></i>
+                          <span>{event.rejectionReason}</span>
                         </div>
-                      </td>
+                      ) : (
+                        <span style={{ color: "#cbd5e1" }}>—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
 
-                      <td style={styles.td}>
-                        <span
-                          style={{
-                            ...styles.statusBadge,
-                            backgroundColor: event.status === "approved" ? "#e8f5e9" : "#ffebee",
-                            color: event.status === "approved" ? "#2e7d32" : "#c62828",
-                          }}
-                        >
-                          {event.status === "approved" && (
-                            <i className="fas fa-check-circle" style={{ marginRight: "4px" }}></i>
-                          )}
-                          {event.status === "rejected" && (
-                            <i className="fas fa-times-circle" style={{ marginRight: "4px" }}></i>
-                          )}
-                          {event.status.charAt(0).toUpperCase() + event.status.slice(1)}
-                        </span>
-                      </td>
-
-                      <td style={{ ...styles.td, ...styles.rejectionReasonCell }}>
-                        {event.status === "rejected" ? (
-                          <span style={styles.rejectionReason}>
-                            <i className="fas fa-exclamation-circle" style={{ marginRight: "4px" }}></i>
-                            {event.rejectionReason}
-                          </span>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-
-                  {processedEvents.length === 0 && (
-                    <tr>
-                      <td colSpan="7" style={{ ...styles.td, textAlign: "center", padding: "30px" }}>
-                        <i className="fas fa-inbox" style={{ fontSize: "36px", color: "#ccc", marginBottom: "10px", display: "block" }}></i>
-                        No processed events yet
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                {processedEvents.length === 0 && (
+                  <tr>
+                    <td colSpan="7" style={styles.tableEmptyStateCell}>
+                      <i className="fas fa-folder-open" style={{ fontSize: "40px", color: "#cbd5e1", marginBottom: "10px", display: "block" }}></i>
+                      No archival decisions registered yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
 
-      {/* Rejection Modal */}
+      {/* ── REJECTION SHEET MODAL OVERLAY ── */}
       {showRejectModal.show && (
-        <div style={styles.modalOverlay} onClick={closeRejectModal}>
-          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-            <div style={styles.modalHeader}>
-              <h3 style={styles.modalTitle}>
-                <i className="fas fa-exclamation-triangle" style={{ marginRight: "8px", color: "#ff9800" }}></i>
-                Reject Event Request
+        <div style={styles.modalBlurOverlay} onClick={closeRejectModal}>
+          <div style={styles.modernModalBox} onClick={(e) => e.stopPropagation()}>
+            <div style={styles.modalTopBar}>
+              <h3 style={styles.modalTitleText}>
+                <i className="fas fa-triangle-exclamation" style={{ color: "#f59e0b" }}></i>
+                Specify Rejection Metrics
               </h3>
-              <button style={styles.closeButton} onClick={closeRejectModal}>
-                <i className="fas fa-times"></i>
+              <button style={styles.circleCloseButton} onClick={closeRejectModal}>
+                <i className="fas fa-xmark"></i>
               </button>
             </div>
 
-            <div style={styles.modalBody}>
-              <p style={styles.modalText}>
-                Please select a reason for rejecting this event request:
-              </p>
-
-              <div style={styles.radioGroup}>
-                {rejectionReasons.map((reason) => (
-                  <label key={reason} style={styles.radioLabel}>
-                    <input
-                      type="radio"
-                      name="rejectionReason"
-                      value={reason}
-                      checked={selectedReason === reason}
-                      onChange={(e) => setSelectedReason(e.target.value)}
-                      style={styles.radioInput}
-                    />
-                    <span style={styles.radioText}>{reason}</span>
-                  </label>
-                ))}
+            <div style={styles.modalCenterContent}>
+              <p style={styles.modalInstructionalLabel}>Select an administrative operational constraint option:</p>
+              <div style={styles.radioSelectionStack}>
+                {rejectionReasons.map((reason) => {
+                  const isSelected = selectedReason === reason;
+                  return (
+                    <label
+                      key={reason}
+                      style={{
+                        ...styles.customRadioCard,
+                        borderColor: isSelected ? "#3b82f6" : "#e2e8f0",
+                        backgroundColor: isSelected ? "#f0f6ff" : "white",
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="rejectionReason"
+                        value={reason}
+                        checked={selectedReason === reason}
+                        onChange={(e) => setSelectedReason(e.target.value)}
+                        style={styles.hiddenNativeRadio}
+                      />
+                      <span style={{ ...styles.customRadioCircle, borderColor: isSelected ? "#3b82f6" : "#cbd5e1" }}>
+                        {isSelected && <span style={styles.customRadioInnerCircle}></span>}
+                      </span>
+                      <span style={styles.radioLabelStringText}>{reason}</span>
+                    </label>
+                  );
+                })}
               </div>
 
               {selectedReason === "Other" && (
                 <textarea
-                  style={styles.textarea}
-                  placeholder="Please specify the reason..."
+                  style={styles.premiumTextareaField}
+                  placeholder="Elaborate administrative logs overview context..."
                   value={customReason}
                   onChange={(e) => setCustomReason(e.target.value)}
                   rows="3"
@@ -487,14 +417,9 @@ const Events = () => {
               )}
             </div>
 
-            <div style={styles.modalFooter}>
-              <button style={styles.cancelButton} onClick={closeRejectModal}>
-                Cancel
-              </button>
-              <button style={styles.confirmRejectButton} onClick={confirmReject}>
-                <i className="fas fa-ban" style={{ marginRight: "6px" }}></i>
-                Confirm Rejection
-              </button>
+            <div style={styles.modalActionButtonsFooter}>
+              <button style={styles.modalDismissButton} onClick={closeRejectModal}>Cancel</button>
+              <button style={styles.modalConfirmExecutionButton} onClick={confirmReject}>Confirm Denial</button>
             </div>
           </div>
         </div>
@@ -503,6 +428,7 @@ const Events = () => {
   );
 };
 
+// ── ADVANCED CORE UI DESIGN STYLE SHEET METRICS ──────────────────────────────
 const styles = {
   mainContent: {
     position: "absolute",
@@ -510,385 +436,429 @@ const styles = {
     left: "250px",
     right: 0,
     bottom: 0,
-    padding: "25px 30px",
-    fontFamily: "'Poppins', Arial, sans-serif",
-    backgroundColor: "#f4f4f4",
+    padding: "32px 40px",
+    fontFamily: "'Poppins', system-ui, -apple-system, sans-serif",
+    backgroundColor: "#f8fafc",
     minHeight: "100vh",
     width: "calc(100% - 250px)",
     boxSizing: "border-box",
     overflowX: "hidden",
   },
-  container: {
-    width: "100%",
-    height: "auto",
-    background: "#fff",
-    padding: "30px",
-    borderRadius: "10px",
-    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
-    boxSizing: "border-box",
+  headerDashboard: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: "32px",
+    borderBottom: "1px solid #e2e8f0",
+    paddingBottom: "20px",
+  },
+  headingMain: {
+    margin: 0,
+    fontSize: "28px",
+    fontWeight: "800",
+    color: "#0f172a",
+    letterSpacing: "-0.5px",
+  },
+  subtitleMain: {
+    margin: "4px 0 0 0",
+    color: "#64748b",
+    fontSize: "14px",
+  },
+  totalBadgePanel: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    backgroundColor: "#e0f2fe",
+    padding: "10px 16px",
+    borderRadius: "14px",
+    fontSize: "14px",
+    fontWeight: "700",
+    color: "#0369a1",
   },
   loadingContainer: {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    padding: "60px 20px",
+    minHeight: "60vh",
   },
   spinner: {
-    width: "50px",
-    height: "50px",
-    border: "4px solid #f3f3f3",
-    borderTop: "4px solid #3683F0",
+    width: "44px",
+    height: "44px",
+    border: "3.5px solid #e2e8f0",
+    borderTop: "3.5px solid #009966",
     borderRadius: "50%",
-    animation: "spin 1s linear infinite",
+    animation: "spin 0.85s cubic-bezier(0.4, 0, 0.2, 1) infinite",
   },
-  heading: {
-    color: "#333",
-    fontSize: "28px",
-    marginBottom: "25px",
-    textAlign: "center",
+  notification: {
+    background: "linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)",
+    color: "#15803d",
+    padding: "16px 24px",
+    border: "1px solid #bbf7d0",
+    marginBottom: "28px",
+    borderRadius: "16px",
     display: "flex",
     alignItems: "center",
-    justifyContent: "center",
+    fontWeight: "600",
+    fontSize: "14px",
+    boxShadow: "0 4px 12px rgba(22, 163, 74, 0.05)",
   },
-  section: {
+  sectionArea: {
     marginBottom: "40px",
   },
   subHeading: {
-    color: "#333",
-    fontSize: "20px",
+    color: "#1e293b",
+    fontSize: "18px",
+    fontWeight: "700",
     marginBottom: "20px",
     display: "flex",
+    justifyContent: "space-between",
     alignItems: "center",
-    borderBottom: "2px solid #e0e0e0",
-    paddingBottom: "10px",
+    letterSpacing: "-0.2px",
   },
-  badge: {
-    marginLeft: "10px",
-    backgroundColor: "#ff9800",
-    color: "white",
+  badgeOrange: {
+    backgroundColor: "#fef3c7",
+    color: "#d97706",
     padding: "4px 12px",
-    borderRadius: "12px",
-    fontSize: "14px",
-    fontWeight: "bold",
-  },
-  notification: {
-    background: "linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%)",
-    color: "#2e7d32",
-    padding: "15px 20px",
-    border: "1px solid #4caf50",
-    marginBottom: "20px",
-    borderRadius: "8px",
-    display: "flex",
-    alignItems: "center",
-    fontWeight: "500",
-  },
-  pendingList: {
-    display: "grid",
-    gap: "16px",
-  },
-  eventCard: {
-    border: "1px solid #e0e0e0",
-    borderRadius: "12px",
-    background: "white",
-    boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
-    transition: "all 0.3s ease",
-    overflow: "hidden",
-  },
-  cardHeader: {
-    background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-    padding: "16px 20px",
-    color: "white",
-  },
-  eventTitle: {
-    margin: "0 0 8px 0",
-    fontSize: "20px",
-    fontWeight: "600",
-  },
-  eventType: {
-    backgroundColor: "rgba(255,255,255,0.2)",
-    padding: "4px 12px",
-    borderRadius: "12px",
-    fontSize: "13px",
-    fontWeight: "500",
-  },
-  cardBody: {
-    padding: "20px",
-  },
-  description: {
-    color: "#666",
-    marginBottom: "16px",
-    lineHeight: "1.6",
-  },
-  eventDetails: {
-    display: "grid",
-    gap: "10px",
-  },
-  detailItem: {
-    display: "flex",
-    alignItems: "center",
-    flexWrap: "wrap",
-    color: "#555",
-    fontSize: "14px",
-    gap: "4px",
-  },
-  icon: {
-    marginRight: "8px",
-    color: "#3683F0",
-    width: "16px",
-  },
-  // Name shown in the pending card detail row
-  nameText: {
-    fontWeight: "600",
-    color: "#333",
-  },
-  // Small email pill next to the name in pending card
-  emailChip: {
-    marginLeft: "6px",
-    backgroundColor: "#f0f4ff",
-    color: "#3683F0",
-    border: "1px solid #c7d9ff",
-    borderRadius: "20px",
-    padding: "2px 10px",
+    borderRadius: "10px",
     fontSize: "12px",
-    fontWeight: "500",
+    fontWeight: "700",
   },
-  // Time slot pill used in both card and table
-  timeSlotChip: {
-    display: "inline-flex",
-    alignItems: "center",
-    backgroundColor: "#fff3e0",
-    color: "#e65100",
-    border: "1px solid #ffcc80",
-    borderRadius: "20px",
-    padding: "3px 10px",
-    fontSize: "12px",
-    fontWeight: "600",
+  pendingGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))",
+    gap: "24px",
   },
-  actions: {
-    padding: "16px 20px",
-    borderTop: "1px solid #f0f0f0",
-    display: "flex",
-    gap: "10px",
-  },
-  acceptButton: {
-    padding: "10px 20px",
-    border: "none",
-    borderRadius: "8px",
-    cursor: "pointer",
-    backgroundColor: "#4caf50",
-    color: "white",
-    fontSize: "15px",
-    fontWeight: "600",
-    transition: "all 0.3s ease",
-    flex: 1,
-  },
-  rejectButton: {
-    padding: "10px 20px",
-    border: "none",
-    borderRadius: "8px",
-    cursor: "pointer",
-    backgroundColor: "#f44336",
-    color: "white",
-    fontSize: "15px",
-    fontWeight: "600",
-    transition: "all 0.3s ease",
-    flex: 1,
-  },
-  noEvents: {
-    textAlign: "center",
-    padding: "60px 20px",
-    color: "#999",
-  },
-  tableContainer: {
-    overflowX: "auto",
-  },
-  table: {
-    width: "100%",
-    borderCollapse: "collapse",
+  premiumCard: {
     backgroundColor: "white",
-    borderRadius: "8px",
-    overflow: "hidden",
-  },
-  th: {
-    border: "1px solid #e0e0e0",
-    padding: "14px",
-    textAlign: "left",
-    background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-    color: "white",
-    fontWeight: "600",
-    fontSize: "14px",
-    whiteSpace: "nowrap",
-  },
-  td: {
-    border: "1px solid #e0e0e0",
-    padding: "14px",
-    textAlign: "left",
-    fontSize: "14px",
-    verticalAlign: "middle",
-  },
-  tableRow: {
-    transition: "background 0.15s",
-  },
-  typeChip: {
-    backgroundColor: "#f5f5f5",
-    padding: "4px 10px",
-    borderRadius: "12px",
-    fontSize: "13px",
-    whiteSpace: "nowrap",
-  },
-  // Stacked name + email inside the table cell
-  requesterCell: {
+    borderRadius: "20px",
+    border: "1px solid #e2e8f0",
+    boxShadow: "0 4px 20px rgba(15, 23, 42, 0.02)",
     display: "flex",
     flexDirection: "column",
-    gap: "3px",
+    position: "relative",
+    overflow: "hidden",
+    transition: "transform 0.2s, box-shadow 0.2s",
   },
-  requesterName: {
-    fontWeight: "600",
-    color: "#333",
-    fontSize: "13px",
+  cardAccentBar: {
+    height: "4px",
+    background: "linear-gradient(90deg, #6366f1, #764ba2)",
+    width: "100%",
   },
-  requesterEmail: {
-    color: "#888",
+  premiumCardBody: {
+    padding: "24px",
+    flex: 1,
+  },
+  eventTitle: {
+    margin: 0,
+    fontSize: "18px",
+    fontWeight: "700",
+    color: "#0f172a",
+    lineHeight: "1.4",
+  },
+  eventTypeTag: {
+    backgroundColor: "#f1f5f9",
+    padding: "4px 10px",
+    borderRadius: "8px",
     fontSize: "12px",
-  },
-  statusBadge: {
-    padding: "6px 12px",
-    borderRadius: "12px",
-    fontSize: "13px",
     fontWeight: "600",
-    display: "inline-flex",
-    alignItems: "center",
+    color: "#475569",
     whiteSpace: "nowrap",
   },
-  rejectionReasonCell: {
-    maxWidth: "250px",
+  descriptionText: {
+    color: "#64748b",
+    fontSize: "14px",
+    lineHeight: "1.6",
+    margin: "0 0 20px 0",
   },
-  rejectionReason: {
-    color: "#c62828",
-    fontStyle: "italic",
+  metaInformationList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+    backgroundColor: "#f8fafc",
+    padding: "16px",
+    borderRadius: "14px",
+  },
+  metaRow: {
     display: "flex",
     alignItems: "center",
+    gap: "10px",
+    fontSize: "13px",
+    color: "#475569",
   },
-  modalOverlay: {
+  emailBadgeChip: {
+    fontSize: "11px",
+    backgroundColor: "white",
+    color: "#6366f1",
+    border: "1px solid #e0e7ff",
+    borderRadius: "6px",
+    padding: "1px 6px",
+  },
+  timeSlotPill: {
+    backgroundColor: "#fef3c7",
+    color: "#b45309",
+    padding: "2px 8px",
+    borderRadius: "6px",
+    fontWeight: "600",
+    fontSize: "11px",
+  },
+  gridDetailsTwoColumn: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "10px",
+    marginTop: "4px",
+    borderTop: "1px solid #f1f5f9",
+    paddingTop: "10px",
+  },
+  cardActionsRow: {
+    padding: "16px 24px",
+    backgroundColor: "#fafafa",
+    borderTop: "1px solid #e2e8f0",
+    display: "flex",
+    gap: "12px",
+  },
+  actionApproveButton: {
+    flex: 1,
+    padding: "11px",
+    border: "none",
+    borderRadius: "12px",
+    cursor: "pointer",
+    backgroundColor: "#009966",
+    color: "white",
+    fontWeight: "600",
+    fontSize: "14px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "6px",
+  },
+  actionRejectButton: {
+    flex: 1,
+    padding: "11px",
+    border: "none",
+    borderRadius: "12px",
+    cursor: "pointer",
+    backgroundColor: "#ef4444",
+    color: "white",
+    fontWeight: "600",
+    fontSize: "14px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "6px",
+  },
+  cleanEmptyState: {
+    gridColumn: "1 / -1",
+    textAlign: "center",
+    padding: "50px 20px",
+    backgroundColor: "white",
+    borderRadius: "20px",
+    border: "1px dashed #cbd5e1",
+  },
+  premiumTableWrapper: {
+    backgroundColor: "white",
+    borderRadius: "20px",
+    border: "1px solid #e2e8f0",
+    boxShadow: "0 4px 20px rgba(15, 23, 42, 0.01)",
+    overflow: "hidden",
+  },
+  premiumTable: {
+    width: "100%",
+    borderCollapse: "collapse",
+    textAlign: "left",
+  },
+  pTh: {
+    padding: "16px 20px",
+    backgroundColor: "#f8fafc",
+    color: "#475569",
+    fontWeight: "600",
+    fontSize: "13px",
+    borderBottom: "1px solid #e2e8f0",
+  },
+  pTd: {
+    padding: "16px 20px",
+    fontSize: "13.5px",
+    borderBottom: "1px solid #f1f5f9",
+    verticalAlign: "middle",
+  },
+  pTableRow: {
+    transition: "background-color 0.15s",
+  },
+  tableCategoryChip: {
+    backgroundColor: "#f1f5f9",
+    color: "#334155",
+    padding: "4px 8px",
+    borderRadius: "6px",
+    fontSize: "12px",
+    fontWeight: "500",
+  },
+  premiumStatusBadge: {
+    padding: "4px 10px",
+    borderRadius: "8px",
+    fontSize: "11px",
+    fontWeight: "700",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+  },
+  dotIndicator: {
+    width: "6px",
+    height: "6px",
+    borderRadius: "50%",
+  },
+  rejectionTextContainer: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: "6px",
+    color: "#991b1b",
+    fontSize: "12.5px",
+    fontStyle: "italic",
+  },
+  tableEmptyStateCell: {
+    textAlign: "center",
+    padding: "40px",
+    color: "#94a3b8",
+  },
+  modalBlurOverlay: {
     position: "fixed",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: "rgba(15, 23, 42, 0.3)",
+    backdropFilter: "blur(4px)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     zIndex: 1000,
   },
-  modal: {
+  modernModalBox: {
     backgroundColor: "white",
-    borderRadius: "12px",
+    borderRadius: "24px",
     width: "90%",
-    maxWidth: "500px",
-    boxShadow: "0 10px 40px rgba(0,0,0,0.2)",
+    maxWidth: "480px",
+    boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+    overflow: "hidden",
   },
-  modalHeader: {
+  modalTopBar: {
     padding: "20px 24px",
-    borderBottom: "1px solid #e0e0e0",
+    borderBottom: "1px solid #e2e8f0",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  modalTitle: {
+  modalTitleText: {
     margin: 0,
-    fontSize: "20px",
-    color: "#333",
+    fontSize: "18px",
+    fontWeight: "700",
+    color: "#0f172a",
     display: "flex",
     alignItems: "center",
+    gap: "10px",
   },
-  closeButton: {
-    background: "none",
+  circleCloseButton: {
+    background: "#f1f5f9",
     border: "none",
-    fontSize: "24px",
+    fontSize: "16px",
     cursor: "pointer",
-    color: "#999",
-    padding: "0",
+    color: "#64748b",
     width: "32px",
     height: "32px",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: "4px",
+    borderRadius: "50%",
   },
-  modalBody: {
+  modalCenterContent: {
     padding: "24px",
   },
-  modalText: {
-    marginBottom: "16px",
-    color: "#666",
-    fontSize: "15px",
+  modalInstructionalLabel: {
+    margin: "0 0 16px 0",
+    color: "#475569",
+    fontSize: "14.5px",
+    fontWeight: "500",
   },
-  radioGroup: {
-    display: "grid",
-    gap: "12px",
+  radioSelectionStack: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "10px",
   },
-  radioLabel: {
+  customRadioCard: {
     display: "flex",
     alignItems: "center",
-    padding: "12px",
-    border: "2px solid #e0e0e0",
-    borderRadius: "8px",
+    padding: "14px 16px",
+    borderRadius: "12px",
+    border: "1.5px solid",
     cursor: "pointer",
-    transition: "all 0.2s ease",
+    transition: "all 0.15s ease",
   },
-  radioInput: {
-    marginRight: "10px",
-    cursor: "pointer",
-    width: "18px",
-    height: "18px",
+  hiddenNativeRadio: {
+    display: "none",
   },
-  radioText: {
-    fontSize: "15px",
-    color: "#333",
-  },
-  textarea: {
-    width: "100%",
-    marginTop: "12px",
-    padding: "12px",
-    border: "2px solid #e0e0e0",
-    borderRadius: "8px",
-    fontSize: "14px",
-    fontFamily: "'Poppins', Arial, sans-serif",
-    resize: "vertical",
-    boxSizing: "border-box",
-  },
-  modalFooter: {
-    padding: "16px 24px",
-    borderTop: "1px solid #e0e0e0",
+  customRadioCircle: {
+    width: "16px",
+    height: "16px",
+    borderRadius: "50%",
+    border: "2px solid",
     display: "flex",
-    gap: "10px",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: "12px",
+    backgroundColor: "white",
+  },
+  customRadioInnerCircle: {
+    width: "8px",
+    height: "8px",
+    borderRadius: "50%",
+    backgroundColor: "#3b82f6",
+  },
+  radioLabelStringText: {
+    fontSize: "14px",
+    fontWeight: "600",
+    color: "#334155",
+  },
+  premiumTextareaField: {
+    width: "100%",
+    marginTop: "16px",
+    padding: "12px 16px",
+    border: "1.5px solid #e2e8f0",
+    borderRadius: "12px",
+    fontSize: "14px",
+    fontFamily: "inherit",
+    resize: "none",
+    boxSizing: "border-box",
+    outline: "none",
+  },
+  modalActionButtonsFooter: {
+    padding: "16px 24px",
+    backgroundColor: "#f8fafc",
+    borderTop: "1px solid #e2e8f0",
+    display: "flex",
+    gap: "12px",
     justifyContent: "flex-end",
   },
-  cancelButton: {
-    padding: "10px 24px",
-    border: "2px solid #e0e0e0",
-    borderRadius: "8px",
+  modalDismissButton: {
+    padding: "10px 20px",
+    border: "1px solid #cbd5e1",
+    borderRadius: "12px",
     cursor: "pointer",
     backgroundColor: "white",
-    color: "#666",
-    fontSize: "15px",
+    color: "#475569",
+    fontSize: "14px",
     fontWeight: "600",
   },
-  confirmRejectButton: {
-    padding: "10px 24px",
+  modalConfirmExecutionButton: {
+    padding: "10px 20px",
     border: "none",
-    borderRadius: "8px",
+    borderRadius: "12px",
     cursor: "pointer",
-    backgroundColor: "#f44336",
+    backgroundColor: "#ef4444",
     color: "white",
-    fontSize: "15px",
+    fontSize: "14px",
     fontWeight: "600",
   },
 };
 
-// Add keyframes for spinner animation
 const styleSheet = document.styleSheets[0];
 const keyframes = `@keyframes spin {
   0% { transform: rotate(0deg); }

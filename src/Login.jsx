@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, LockKeyhole, UserRound } from "lucide-react";
-import adminLogo from "./assets/admin_logo.png";
 import "./Login.css";
 
 const ADMIN_USERNAME = "admin";
@@ -42,7 +41,7 @@ function Login() {
       <section className="login-panel" aria-labelledby="login-title">
         <div className="login-brand">
           <div className="login-logo" aria-hidden="true">
-            <img src={adminLogo} alt="Orphan Care logo" />
+            <LockKeyhole size={28} />
           </div>
           <span>Orphan Care Management System</span>
         </div>
@@ -120,20 +119,14 @@ function Login() {
               "Login"
             )}
           </button>
-        </form> 
+        </form>
 
         <p className="login-footer">
           Secure access for authorized administrators only
         </p>
       </section>
 
-      <aside
-        className="login-visual"
-        aria-hidden="true"
-        style={{
-          backgroundImage: `linear-gradient(155deg, rgba(25, 38, 83, 0.12), rgba(39, 24, 91, 0.78)), url(${adminLogo})`,
-        }}
-      >
+      <aside className="login-visual" aria-hidden="true">
         <div className="login-orb login-orb-one" />
         <div className="login-orb login-orb-two" />
         <div className="login-visual-content">

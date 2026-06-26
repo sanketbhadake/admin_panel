@@ -13,7 +13,8 @@ import Volunteers from "./volunteers";
 import Announcements from "./Announcements";
 import Events from "./events";
 import Reports from "./reports";
-import Feedback from "./Feedback"; // 1. Import your newly separated Feedback Page component
+import Feedback from "./Feedback";
+import DonorTracking from "./DonorTracking";
 import "./App.css";
 
 function ProtectedLayout() {
@@ -35,6 +36,10 @@ function ProtectedLayout() {
           <Route path="/events" element={<Events />} />
           <Route path="/reports" element={<Reports />} />
           <Route path="/feedback" element={<Feedback />} />
+          <Route
+            path="/donor-tracking/:donationId"
+            element={<DonorTracking />}
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
