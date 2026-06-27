@@ -1,585 +1,686 @@
-import React, { useEffect, useState } from "react";
-import {
-  collection,
-  getDocs,
-  deleteDoc,
-  doc,
-  setDoc,
-} from "firebase/firestore";
-import { createUserWithEmailAndPassword } from "firebase/auth";
-import { db, auth } from "./firebase/firebase";
+const {
+  onDocumentCreated,
+} = require("firebase-functions/v2/firestore");
+const { onRequest } = require("firebase-functions/v2/https");
+const functions = require("firebase-functions/v1");
+const admin = require("firebase-admin");
+const nodemailer = require("nodemailer");
+const axios = require("axios");
 
-const Volunteers = () => {
-  const [volunteers, setVolunteers] = useState([]);
-  const [feedback, setFeedback] = useState({ message: "", type: "" });
-  const [isSubmitting, setIsSubmitting] = useState(false);
+admin.initializeApp();
 
-  const [formData, setFormData] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    password: "",
+const db = admin.firestore();
+
+const invalidTokenCodes = new Set([
+  "messaging/invalid-registration-token",
+  "messaging/registration-token-not-registered",
+  "messaging/invalid-argument",
+]);
+
+const toFcmData = (data = {}) =>
+  Object.fromEntries(
+    Object.entries(data)
+      .filter(([, value]) => value !== undefined && value !== null)
+      .map(([key, value]) => [key, String(value)]),
+  );
+
+const getTokens = (data = {}) => {
+  const tokens = new Set();
+
+  if (typeof data.fcmToken === "string" && data.fcmToken.trim()) {
+    tokens.add(data.fcmToken.trim());
+  }
+
+  if (Array.isArray(data.fcmTokens)) {
+    data.fcmTokens.forEach((token) => {
+      if (typeof token === "string" && token.trim()) {
+        tokens.add(token.trim());
+      }
+    });
+  }
+
+  return [...tokens];
+};
+
+const findRecipientDoc = async (recipientId) => {
+  const collections = ["donors", "users", "volunteers"];
+  for (const col of collections) {
+    const ref = db.collection(col).doc(recipientId);
+    const snap = await ref.get();
+    if (snap.exists) return { ref, snapshot: snap };
+  }
+  return null;
+};
+
+const removeInvalidTokens = async (recipientRef, tokens, responses = []) => {
+  const invalidTokens = [];
+
+  responses.forEach((response, index) => {
+    const code = response.error?.code;
+    if (code && invalidTokenCodes.has(code)) {
+      invalidTokens.push(tokens[index]);
+    }
   });
 
-  /* ================= INPUT HANDLER ================= */
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+  if (!invalidTokens.length) return;
+
+  await recipientRef.update({
+    fcmTokens: admin.firestore.FieldValue.arrayRemove(...invalidTokens),
+    fcmToken: admin.firestore.FieldValue.delete(),
+  });
+};
+
+const sendToTokens = async ({ recipientRef, tokens, title, body, data }) => {
+  if (!tokens.length) return { successCount: 0, failureCount: 0 };
+
+  const message = {
+    notification: {
+      title: title || "Notification",
+      body: body || "",
+    },
+    data: toFcmData(data),
   };
 
-  /* ================= FETCH VOLUNTEERS ================= */
-  useEffect(() => {
-    const fetchVolunteers = async () => {
-      try {
-        const querySnapshot = await getDocs(collection(db, "volunteers"));
-        const list = querySnapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
-        setVolunteers(list);
-      } catch (err) {
-        console.error("Fetch error:", err);
-      }
-    };
-
-    fetchVolunteers();
-  }, []);
-
-  /* ================= SHOW FEEDBACK ================= */
-  const showFeedback = (message, type) => {
-    setFeedback({ message, type });
-    setTimeout(() => {
-      setFeedback({ message: "", type: "" });
-    }, 4000);
-  };
-
-  /* ================= ADD VOLUNTEER ================= */
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-
-    if (
-      formData.name &&
-      formData.email &&
-      formData.phone &&
-      formData.password
-    ) {
-      setIsSubmitting(true);
-      try {
-        const userCredential = await createUserWithEmailAndPassword(
-          auth,
-          formData.email,
-          formData.password,
-        );
-
-        const userUid = userCredential.user.uid;
-
-        const newVolunteerDoc = {
-          name: formData.name,
-          email: formData.email,
-          phone: formData.phone,
-          uid: userUid,
-          role: "volunteer",
-          profilePic: "",
-          createdAt: new Date(),
-        };
-
-        await setDoc(doc(db, "volunteers", userUid), newVolunteerDoc);
-
-        setVolunteers([
-          ...volunteers,
-          {
-            id: userUid,
-            ...newVolunteerDoc,
-          },
-        ]);
-
-        setFormData({ name: "", email: "", phone: "", password: "" });
-        showFeedback("Volunteer registered successfully!", "success");
-      } catch (error) {
-        console.error("Error adding volunteer:", error);
-        showFeedback("Failed to add volunteer: " + error.message, "error");
-      } finally {
-        setIsSubmitting(false);
-      }
-    } else {
-      showFeedback("Please fill in all fields.", "error");
-    }
-  };
-
-  /* ================= REMOVE VOLUNTEER ================= */
-  const removeVolunteer = async (id) => {
-    if (
-      !window.confirm(
-        "Are you sure you want to revoke this volunteer's account assignment?",
-      )
-    )
-      return;
+  if (tokens.length === 1) {
     try {
-      await deleteDoc(doc(db, "volunteers", id));
-      setVolunteers(volunteers.filter((v) => v.id !== id));
-      showFeedback(
-        "Volunteer removed successfully from system nodes.",
-        "success",
+      await admin.messaging().send({ ...message, token: tokens[0] });
+      return { successCount: 1, failureCount: 0 };
+    } catch (error) {
+      if (recipientRef && invalidTokenCodes.has(error.code)) {
+        await removeInvalidTokens(recipientRef, tokens, [{ error }]);
+      }
+      throw error;
+    }
+  }
+
+  const response = await admin.messaging().sendEachForMulticast({
+    ...message,
+    tokens,
+  });
+
+  if (recipientRef) {
+    await removeInvalidTokens(recipientRef, tokens, response.responses);
+  }
+
+  return response;
+};
+
+const setCorsHeaders = (req, res) => {
+  res.set("Access-Control-Allow-Origin", req.get("origin") || "*");
+  res.set("Vary", "Origin");
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+};
+
+const updateSourceMailStatus = async (data, status, extra = {}) => {
+  if (!data.sourceCollection || !data.sourceDocId) return;
+
+  const prefix = data.mailKind === "delivery_proof" ? "deliveryMail" : "receipt";
+  const update = {
+    [`${prefix}Status`]: status,
+  };
+
+  if (status === "sent") {
+    update[`${prefix}SentAt`] = admin.firestore.FieldValue.serverTimestamp();
+    update[`${prefix}ErrorMessage`] = admin.firestore.FieldValue.delete();
+  }
+
+  if (status === "failed") {
+    update[`${prefix}FailedAt`] = admin.firestore.FieldValue.serverTimestamp();
+    update[`${prefix}ErrorMessage`] = extra.errorMessage || "Mail failed";
+  }
+
+  await db.collection(data.sourceCollection).doc(data.sourceDocId).update(update);
+};
+
+// ─── SMTP CONFIG ─────────────────────────────────────────────────────────────
+const getSmtpConfig = () => {
+  const host = process.env.SMTP_HOST;
+  const port = Number(process.env.SMTP_PORT || 587);
+  const secure = process.env.SMTP_SECURE === "true" || port === 465;
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  const from = process.env.SMTP_FROM || user;
+  if (!host || !user || !pass) return null;
+  return { host, port, secure, auth: { user, pass }, from };
+};
+
+// ─── EMAIL HTML BUILDER ───────────────────────────────────────────────────────
+const buildEmailHtml = (data) => {
+  const donorName = data.donorName || "Valued Donor";
+  const mailKind =
+    data.mailKind || (data.deliveryProofImageUrl ? "delivery_proof" : "receipt");
+
+  if (mailKind === "delivery_proof") {
+    return `
+    <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #111827;">
+      <h2 style="color: #1f2937;">Donation Delivery Update</h2>
+      <p>Dear ${donorName},</p>
+      <p>Your donated items have reached Hope Home Foundation. Thank you for helping us support the children in our care.</p>
+      ${data.deliveryNotes ? `<p><strong>Delivery notes:</strong> ${data.deliveryNotes}</p>` : ""}
+      ${data.deliveryProofImageUrl ? `<p><a href="${data.deliveryProofImageUrl}">View delivery proof</a></p>` : ""}
+      <br />
+      <p style="margin: 0;">Warm regards,</p>
+      <p style="margin: 4px 0 0; font-weight: 700;">Hop Home Foundation</p>
+    </div>
+  `;
+  }
+
+  const heading =
+    data.type === "money"
+      ? "Official Donation Receipt"
+      : "Material Donation Acknowledgement";
+  return `
+    <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto; color: #111827;">
+      <h2 style="color: #1f2937;">${heading}</h2>
+      <p>Dear ${donorName},</p>
+      <p>Thank you for your generous support to Hope Home Foundation.</p>
+      <p>Please find your ${data.type === "money" ? "receipt" : "acknowledgement"} attached to this email.</p>
+      <p>If you have any questions, please reply to this email and we will be happy to assist.</p>
+      <br />
+      <p style="margin: 0;">Warm regards,</p>
+      <p style="margin: 4px 0 0; font-weight: 700;">Hope Home Foundation</p>
+    </div>
+  `;
+};
+
+// ─── 1. SEND DONATION RECEIPT EMAIL (v2, asia-south1) ────────────────────────
+exports.sendDonationMail = onDocumentCreated(
+  {
+    document: "mail_requests/{requestId}",
+    region: "asia-south1",
+    secrets: ["SMTP_HOST", "SMTP_USER", "SMTP_PASS"],
+  },
+  async (event) => {
+    const snapshot = event.data;
+    const requestId = event.params.requestId;
+    const data = snapshot.data() || {};
+
+    const processableStatuses = new Set([
+      undefined,
+      null,
+      "pending",
+      "queued",
+      "delivery_proof_uploaded",
+    ]);
+    if (!processableStatuses.has(data.status)) return null;
+
+    const donorEmail = data.donorEmail;
+    if (!donorEmail) {
+      await snapshot.ref.update({
+        status: "failed",
+        errorMessage: "Missing donor email",
+      });
+      await updateSourceMailStatus(data, "failed", {
+        errorMessage: "Missing donor email",
+      });
+      return null;
+    }
+
+    try {
+      const smtpConfig = getSmtpConfig();
+      if (!smtpConfig) throw new Error("SMTP config missing.");
+
+      const transporter = nodemailer.createTransport(smtpConfig);
+      const attachments = [];
+
+      if (data.pdfUrl) {
+        const response = await axios.get(data.pdfUrl, {
+          responseType: "arraybuffer",
+          timeout: 20000,
+        });
+        attachments.push({
+          filename: "donation-document.pdf",
+          content: Buffer.from(response.data),
+          contentType: "application/pdf",
+        });
+      }
+
+      const subject =
+        data.mailKind === "delivery_proof" || data.deliveryProofImageUrl
+          ? "Donation Delivery Update"
+          : data.type === "money"
+            ? "Official Donation Receipt"
+            : "Material Donation Acknowledgement";
+
+      await transporter.sendMail({
+        from: smtpConfig.from,
+        to: donorEmail,
+        subject,
+        html: buildEmailHtml(data),
+        attachments,
+      });
+
+      await snapshot.ref.update({
+        status: "sent",
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        errorMessage: admin.firestore.FieldValue.delete(),
+      });
+      await updateSourceMailStatus(data, "sent");
+
+      console.log(
+        `Receipt email sent to ${donorEmail} for request ${requestId}`,
       );
     } catch (error) {
-      showFeedback("Failed to remove volunteer from database.", "error");
+      console.error(`Failed to send mail for request ${requestId}:`, error);
+      await snapshot.ref.update({
+        status: "failed",
+        errorMessage: error.message || "Unknown mail error",
+      });
+      await updateSourceMailStatus(data, "failed", {
+        errorMessage: error.message || "Unknown mail error",
+      });
     }
-  };
+    return null;
+  },
+);
 
-  return (
-    <>
-      <link
-        rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"
-      />
+// ─── 2. ON DONATION ASSIGNMENT UPDATED (v1, working) ─────────────────────────
+exports.onDonationAssignmentUpdated = functions
+  .region("asia-south1")
+  .firestore.document("donations/{donationId}")
+  .onUpdate(async (change, context) => {
+    const before = change.before.data();
+    const after = change.after.data();
 
-      <div style={styles.mainContent}>
-        {/* Banner Snackbar Feedback Element */}
-        {feedback.message && (
-          <div
-            style={{
-              ...styles.feedbackToast,
-              backgroundColor:
-                feedback.type === "success" ? "#d4edda" : "#f8d7da",
-              color: feedback.type === "success" ? "#155724" : "#721c24",
-              border: `1px solid ${feedback.type === "success" ? "#c3e6cb" : "#f5c6cb"}`,
-            }}
-          >
-            <i
-              className={
-                feedback.type === "success"
-                  ? "fa-solid fa-circle-check"
-                  : "fa-solid fa-triangle-exclamation"
-              }
-            ></i>
-            &nbsp;&nbsp;{feedback.message}
-          </div>
-        )}
+    if (before.status === after.status) return null;
+    if (after.status !== "assigned") return null;
 
-        {/* Dynamic Split Grid View Setup */}
-        <div style={styles.dashboardSplitGrid}>
-          {/* LEFT INTERFACE: INPUT REGISTRATION CARD */}
-          <div style={styles.cardContainer}>
-            <h2 style={styles.subHeading}>
-              <i
-                className="fa-solid fa-user-plus"
-                style={{ color: "#3683F0" }}
-              ></i>{" "}
-              Register New Volunteer
-            </h2>
-            <p style={styles.captionText}>
-              Creates a valid system authentication profile mapping the
-              volunteer role instantly.
-            </p>
+    const volunteerId = after.assignedVolunteerId;
+    if (!volunteerId) return null;
 
-            <form onSubmit={handleSubmit} style={styles.formElement}>
-              <div style={styles.inputGroup}>
-                <label style={styles.fieldLabel}>Full Name</label>
-                <div style={styles.fieldInputWrapper}>
-                  <i className="fa-solid fa-user" style={styles.inputIcon}></i>
-                  <input
-                    type="text"
-                    name="name"
-                    value={formData.name}
-                    onChange={handleInputChange}
-                    placeholder="John Doe"
-                    style={styles.inputField}
-                  />
-                </div>
-              </div>
+    try {
+      const recipient = await findRecipientDoc(volunteerId);
+      if (!recipient) return null;
 
-              <div style={styles.inputGroup}>
-                <label style={styles.fieldLabel}>Email Address</label>
-                <div style={styles.fieldInputWrapper}>
-                  <i
-                    className="fa-solid fa-envelope"
-                    style={styles.inputIcon}
-                  ></i>
-                  <input
-                    type="email"
-                    name="email"
-                    value={formData.email}
-                    onChange={handleInputChange}
-                    placeholder="johndoe@gmail.com"
-                    style={styles.inputField}
-                  />
-                </div>
-              </div>
+      const tokens = getTokens(recipient.snapshot.data());
+      if (!tokens.length) {
+        console.log(`Volunteer ${volunteerId} has no FCM token`);
+        return null;
+      }
 
-              <div style={styles.inputGroup}>
-                <label style={styles.fieldLabel}>Phone Number</label>
-                <div style={styles.fieldInputWrapper}>
-                  <i className="fa-solid fa-phone" style={styles.inputIcon}></i>
-                  <input
-                    type="text"
-                    name="phone"
-                    value={formData.phone}
-                    onChange={handleInputChange}
-                    placeholder="+91 XXXXX XXXXX"
-                    style={styles.inputField}
-                  />
-                </div>
-              </div>
+      await sendToTokens({
+        recipientRef: recipient.ref,
+        tokens,
+        title: "New Pickup Task Assigned",
+        body: "You have been assigned a new donation pickup task.",
+        data: { donationId: context.params.donationId, type: "assignment" },
+      });
 
-              <div style={styles.inputGroup}>
-                <label style={styles.fieldLabel}>Account Access Password</label>
-                <div style={styles.fieldInputWrapper}>
-                  <i className="fa-solid fa-lock" style={styles.inputIcon}></i>
-                  <input
-                    type="password"
-                    name="password"
-                    value={formData.password}
-                    onChange={handleInputChange}
-                    placeholder="•••••••• (Min 6 Characters)"
-                    style={styles.inputField}
-                  />
-                </div>
-              </div>
+      await recipient.ref.collection("notifications").add({
+        title: "New Pickup Task Assigned",
+        body: "You have been assigned a new donation pickup task.",
+        donationId: context.params.donationId,
+        type: "assignment",
+        isRead: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
 
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                style={styles.actionAddBtn}
-              >
-                {isSubmitting ? (
-                  <>
-                    <i className="fa-solid fa-spinner fa-spin"></i> Initializing
-                    Account...
-                  </>
-                ) : (
-                  <>
-                    <i className="fa-solid fa-circle-plus"></i> Create Agent
-                    Identity
-                  </>
-                )}
-              </button>
-            </form>
-          </div>
+      console.log(`Assignment notification sent to volunteer ${volunteerId}`);
+    } catch (error) {
+      console.error("Error sending assignment notification:", error);
+    }
+    return null;
+  });
 
-          {/* RIGHT INTERFACE: LIVE MONITORING REGISTRATION RECORD TABLE */}
-          <div style={{ ...styles.cardContainer, flex: 1.4 }}>
-            <h2 style={styles.subHeading}>
-              <i className="fa-solid fa-users" style={{ color: "#8B56EC" }}></i>{" "}
-              Active Fleet Volunteers
-            </h2>
-            <p style={styles.captionText}>
-              Real-time logs of security authorized couriers tracking logistics
-              payloads.
-            </p>
+// ─── 3. SEND EVENT DECISION NOTIFICATION (v2, asia-south1) ───────────────────
+exports.sendEventDecisionNotification = onDocumentCreated(
+  {
+    document: "event_decisions/{decisionId}",
+    region: "asia-south1",
+  },
+  async (event) => {
+    const data = event.data.data();
+    if (!data) return null;
 
-            {volunteers.length === 0 ? (
-              <div style={styles.emptyContainer}>
-                <i
-                  className="fa-solid fa-folder-open"
-                  style={{
-                    fontSize: "40px",
-                    color: "#CBD5E1",
-                    marginBottom: "12px",
-                  }}
-                ></i>
-                <p>No active logistics operators found in system collection.</p>
-              </div>
-            ) : (
-              <div style={styles.tableResponsiveWrapper}>
-                <table style={styles.dataTable}>
-                  <thead>
-                    <tr>
-                      <th style={{ ...styles.tableTh, width: "28%" }}>
-                        Avatar & Profile
-                      </th>
-                      <th style={{ ...styles.tableTh, width: "34%" }}>
-                        Contact Details
-                      </th>
-                      <th style={{ ...styles.tableTh, width: "22%" }}>
-                        System Access ID
-                      </th>
-                      <th style={{ ...styles.tableTh, width: "16%" }}>
-                        Operation Control
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {volunteers.map((volunteer) => (
-                      <tr key={volunteer.id} style={styles.tableTr}>
-                        <td style={styles.tableTd}>
-                          <div style={styles.avatarProfileGroup}>
-                            <div style={styles.avatarBubble}>
-                              {volunteer.name.trim()[0].toUpperCase()}
-                            </div>
-                            <span style={styles.profilePrimaryText}>
-                              {volunteer.name}
-                            </span>
-                          </div>
-                        </td>
-                        <td style={styles.tableTd}>
-                          <div style={styles.contactDetailsWrapper}>
-                            <span style={styles.contactItem}>
-                              <i
-                                className="fa-solid fa-envelope-open"
-                                style={styles.miniIcon}
-                              ></i>
-                              {volunteer.email}
-                            </span>
-                            <span style={styles.contactItem}>
-                              <i
-                                className="fa-solid fa-phone"
-                                style={styles.miniIcon}
-                              ></i>
-                              {volunteer.phone || "—"}
-                            </span>
-                          </div>
-                        </td>
-                        <td style={styles.tableTd}>
-                          <span style={styles.identityHashText}>
-                            {volunteer.id.substring(0, 8)}...
-                          </span>
-                        </td>
-                        <td style={styles.tableTd}>
-                          <button
-                            onClick={() => removeVolunteer(volunteer.id)}
-                            style={styles.actionRemoveBtn}
-                            title="Revoke system authentication assignment"
-                          >
-                            <i className="fa-solid fa-user-minus"></i> Revoke
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </>
-  );
-};
+    const { userId, decision, eventName = "the event" } = data;
+    if (!userId || !decision) return null;
 
-/* ================= STYLES SHEET ================= */
-const styles = {
-  mainContent: {
-    marginLeft: "250px",
-    padding: "40px 32px",
-    backgroundColor: "#F8FAFC",
-    minHeight: "100vh",
-    fontFamily: "'DM Sans', 'Poppins', Arial, sans-serif",
-    boxSizing: "border-box",
-    width: "calc(100% - 250px)",
-  },
-  dashboardSplitGrid: {
-    display: "flex",
-    gap: "30px",
-    alignItems: "stretch",
-    flexWrap: "wrap",
-    width: "100%",
-    maxWidth: "1400px",
-    margin: "0 auto",
-  },
-  cardContainer: {
-    background: "#FFFFFF",
-    borderRadius: "16px",
-    padding: "30px",
-    boxShadow:
-      "0 1px 3px rgba(15, 23, 42, 0.03), 0 4px 12px rgba(15, 23, 42, 0.03)",
-    border: "1px solid #E2E8F0",
-    flex: "1 1 380px",
-    boxSizing: "border-box",
-  },
-  subHeading: {
-    color: "#0F172A",
-    margin: "0 0 6px 0",
-    fontSize: "18px",
-    fontWeight: "700",
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-  },
-  captionText: {
-    fontSize: "13px",
-    color: "#64748B",
-    margin: "0 0 24px 0",
-  },
-  formElement: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "16px",
-  },
-  inputGroup: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "6px",
-  },
-  fieldLabel: {
-    fontSize: "12px",
-    fontWeight: "600",
-    color: "#475569",
-    textTransform: "uppercase",
-    letterSpacing: "0.5px",
-  },
-  fieldInputWrapper: {
-    position: "relative",
-    display: "flex",
-    alignItems: "center",
-  },
-  inputIcon: {
-    position: "absolute",
-    left: "14px",
-    color: "#94A3B8",
-    fontSize: "14px",
-  },
-  inputField: {
-    width: "100%",
-    padding: "12px 14px 12px 40px",
-    border: "1px solid #CBD5E1",
-    borderRadius: "8px",
-    fontSize: "14px",
-    boxSizing: "border-box",
-    backgroundColor: "#F8FAFC",
-    color: "#1E293B",
-    transition: "all 0.2s ease",
-    outline: "none",
-  },
-  actionAddBtn: {
-    padding: "14px",
-    background: "linear-gradient(90deg, #3683F0, #8B56EC)",
-    color: "white",
-    border: "none",
-    borderRadius: "8px",
-    cursor: "pointer",
-    fontSize: "14px",
-    fontWeight: "600",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "8px",
-    marginTop: "10px",
-    boxShadow: "0 4px 12px rgba(54, 131, 240, 0.2)",
-  },
-  emptyContainer: {
-    textAlign: "center",
-    padding: "60px 20px",
-    color: "#94A3B8",
-    fontSize: "14px",
-  },
-  tableResponsiveWrapper: {
-    width: "100%",
-    overflowX: "auto",
-    borderRadius: "10px",
-    border: "1px solid #E2E8F0",
-  },
-  dataTable: {
-    width: "100%",
-    borderCollapse: "collapse",
-    textAlign: "left",
-    fontSize: "14px",
-    tableLayout: "fixed",      // ← FIXED: enforces column widths
-  },
-  tableTh: {
-    backgroundColor: "#F8FAFC",
-    color: "#475569",
-    padding: "14px 16px",
-    fontWeight: "600",
-    borderBottom: "2px solid #E2E8F0",
-    whiteSpace: "nowrap",      // ← FIXED: headers stay on one line
-    overflow: "hidden",
-  },
-  tableTr: {
-    borderBottom: "1px solid #F1F5F9",
-    backgroundColor: "#FFFFFF",
-  },
-  tableTd: {
-    padding: "14px 16px",
-    color: "#334155",
-    verticalAlign: "middle",
-    overflow: "hidden",
-  },
-  avatarProfileGroup: {
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
-    minWidth: 0,               // ← FIXED: allows flex children to shrink
-  },
-  avatarBubble: {
-    width: "36px",
-    height: "36px",
-    minWidth: "36px",          // ← FIXED: prevents avatar from shrinking
-    borderRadius: "50%",
-    background: "linear-gradient(135deg, #E0E7FF, #C7D2FE)",
-    color: "#4338CA",
-    fontWeight: "700",
-    fontSize: "14px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.4)",
-  },
-  profilePrimaryText: {
-    fontWeight: "600",
-    color: "#0F172A",
-    overflow: "hidden",
-    textOverflow: "ellipsis",  // ← FIXED: long names truncate with ...
-    whiteSpace: "nowrap",
-  },
-  contactDetailsWrapper: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "4px",
-    fontSize: "12px",
-    color: "#475569",
-    minWidth: 0,               // ← FIXED: allows flex children to shrink
-  },
-  contactItem: {
-    display: "flex",
-    alignItems: "center",
-    gap: "6px",
-    overflow: "hidden",
-    textOverflow: "ellipsis",  // ← FIXED: long emails truncate cleanly
-    whiteSpace: "nowrap",
-  },
-  miniIcon: {
-    width: "14px",
-    minWidth: "14px",          // ← FIXED: icon doesn't shrink
-    color: "#94A3B8",
-  },
-  identityHashText: {
-    fontFamily: "monospace",
-    backgroundColor: "#F1F5F9",
-    color: "#64748B",
-    padding: "3px 6px",
-    borderRadius: "4px",
-    fontSize: "12px",
-    display: "inline-block",
-    whiteSpace: "nowrap",
-  },
-  actionRemoveBtn: {
-    padding: "6px 12px",
-    backgroundColor: "#FEF2F2",
-    color: "#EF4444",
-    border: "1px solid #FEE2E2",
-    borderRadius: "6px",
-    cursor: "pointer",
-    fontSize: "12px",
-    fontWeight: "600",
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "6px",
-    transition: "all 0.2s ease",
-    whiteSpace: "nowrap",      // ← FIXED: "Revoke" button text stays inline
-  },
-  feedbackToast: {
-    padding: "14px 20px",
-    marginBottom: "24px",
-    borderRadius: "10px",
-    fontSize: "14px",
-    fontWeight: "600",
-    display: "flex",
-    alignItems: "center",
-    boxShadow: "0 4px 6px -1px rgba(0,0,0,0.01)",
-  },
-};
+    try {
+      const recipient = await findRecipientDoc(userId);
+      if (!recipient) return null;
 
-export default Volunteers;
+      const tokens = getTokens(recipient.snapshot.data());
+      if (!tokens.length) {
+        console.log(`User ${userId} has no FCM token`);
+        return null;
+      }
+
+      const title =
+        decision === "approved"
+          ? "Event Registration Approved!"
+          : "Event Registration Update";
+      const body =
+        decision === "approved"
+          ? `Your registration for ${eventName} has been approved.`
+          : `Your registration for ${eventName} was not approved this time.`;
+
+      await sendToTokens({
+        recipientRef: recipient.ref,
+        tokens,
+        title,
+        body,
+        data: {
+          decisionId: event.params.decisionId,
+          decision,
+          type: "event_decision",
+        },
+      });
+
+      console.log(`Event decision notification sent to user ${userId}`);
+    } catch (error) {
+      console.error("Error sending event decision notification:", error);
+    }
+    return null;
+  },
+);
+
+// ─── 4. MANUAL NOTIFY DONOR — also handles delivered + announcement (HTTP) ───
+// Since onDonationDelivered and sendAnnouncementNotification can't deploy
+// in asia-south1 due to a GCP Eventarc bug, this HTTP endpoint covers them.
+// Call it from your React app after marking a donation delivered or
+// publishing an announcement.
+// exports.sendTargetedNotification = onDocumentCreated(
+//   {
+//     document: "targeted_notifications/{notificationId}",
+//     region: "asia-south1",
+//     database: "(default)",
+//   },
+//   async (event) => {
+//     const snapshot = event.data;
+//     const data = snapshot.data() || {};
+//     const { userId, title, body } = data;
+
+//     if (!userId) {
+//       await snapshot.ref.update({
+//         status: "failed",
+//         errorMessage: "Missing userId",
+//       });
+//       return null;
+//     }
+
+//     try {
+//       const recipient = await findRecipientDoc(userId);
+//       if (!recipient) throw new Error(`No user or volunteer found for ${userId}`);
+
+//       const tokens = getTokens(recipient.snapshot.data());
+//       if (!tokens.length) throw new Error(`No FCM token found for ${userId}`);
+
+//       const response = await sendToTokens({
+//         recipientRef: recipient.ref,
+//         tokens,
+//         title,
+//         body,
+//         data: {
+//           type: data.decision ? "event_decision" : data.type || "notification",
+//           notificationId: event.params.notificationId,
+//           eventId: data.eventId || "",
+//           decision: data.decision || "",
+//         },
+//       });
+
+//       await recipient.ref.collection("notifications").add({
+//         title: title || "Notification",
+//         body: body || "",
+//         eventId: data.eventId || "",
+//         decision: data.decision || "",
+//         isRead: false,
+//         createdAt: admin.firestore.FieldValue.serverTimestamp(),
+//       });
+
+//       await snapshot.ref.update({
+//         status: "sent",
+//         successCount: response.successCount,
+//         failureCount: response.failureCount,
+//         sentAt: admin.firestore.FieldValue.serverTimestamp(),
+//         errorMessage: admin.firestore.FieldValue.delete(),
+//       });
+//     } catch (error) {
+//       console.error("Error sending targeted notification:", error);
+//       await snapshot.ref.update({
+//         status: "failed",
+//         errorMessage: error.message || "Unknown notification error",
+//       });
+//     }
+
+//     return null;
+//   },
+// );
+
+exports.sendTargetedNotification = functions
+  .region("asia-south1")
+  .firestore.document("targeted_notifications/{notificationId}")
+  .onCreate(async (snap, context) => {
+    const data = snap.data() || {};
+    const { userId, title, body, eventId, decision } = data;
+
+    if (!userId) {
+      await snap.ref.update({ status: "failed", errorMessage: "Missing userId" });
+      return null;
+    }
+
+    try {
+      const recipient = await findRecipientDoc(userId);
+      if (!recipient) throw new Error(`No user found for ${userId}`);
+
+      const tokens = getTokens(recipient.snapshot.data());
+      if (!tokens.length) throw new Error(`No FCM token found for ${userId}`);
+
+      const response = await sendToTokens({
+        recipientRef: recipient.ref,
+        tokens,
+        title: title || "Notification",
+        body:  body  || "",
+        data: {
+          type:           decision ? "event_decision" : "notification",
+          eventId:        eventId  || "",
+          decision:       decision || "",
+          notificationId: context.params.notificationId,
+        },
+      });
+
+      await recipient.ref.collection("notifications").add({
+        title:    title    || "Notification",
+        body:     body     || "",
+        eventId:  eventId  || "",
+        decision: decision || "",
+        isRead: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      await snap.ref.update({
+        status: "sent",
+        successCount: response.successCount,
+        failureCount: response.failureCount,
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        errorMessage: admin.firestore.FieldValue.delete(),
+      });
+
+      console.log(`Targeted notification sent to ${userId}`);
+    } catch (error) {
+      console.error("Targeted notification error:", error);
+      await snap.ref.update({ status: "failed", errorMessage: error.message || "Unknown error" });
+    }
+    return null;
+  });
+exports.onDonationDelivered = functions
+  .region("asia-south1")
+  .runWith({ failurePolicy: false })   // ← add this
+  .firestore.document("donations/{donationId}")
+  .onUpdate(async (change, context) => {
+    const before = change.before.data() || {};
+    const after = change.after.data() || {};
+    const becameDelivered =
+      before.status !== "delivered" && after.status === "delivered";
+    const shouldNotify = after.notifyDonor === true;
+
+    if (!becameDelivered && !shouldNotify) return null;
+
+    const donorId = after.donorId || after.userId;
+    if (!donorId) {
+      await change.after.ref.update({ notifyDonor: false });
+      console.warn("Delivered donation has no donorId/userId.");
+      return null;
+    }
+
+    try {
+      const recipient = await findRecipientDoc(donorId);
+      if (!recipient) throw new Error(`No user found for donor ${donorId}`);
+
+      const tokens = getTokens(recipient.snapshot.data());
+      if (!tokens.length) throw new Error(`No FCM token found for donor ${donorId}`);
+
+      await sendToTokens({
+        recipientRef: recipient.ref,
+        tokens,
+        title: "Donation Delivered Successfully",
+        body: "Your donation has reached the orphanage.",
+        data: {
+          type: "donation_delivered",
+          donationId: context.params.donationId,
+          pickupImageUrl: after.proofImageUrl || "",
+          deliveryProofImageUrl: after.deliveryProofImageUrl || "",
+        },
+      });
+      await recipient.ref.collection("notifications").add({
+  title: "Donation Delivered Successfully",
+  body: "Your donation has reached the orphanage.",
+  donationId: context.params.donationId,
+  type: "donation_delivered",
+  isRead: false,
+  createdAt: admin.firestore.FieldValue.serverTimestamp(),
+});
+
+      console.log(`Delivered notification sent to donor ${donorId}`);
+    } catch (error) {
+      console.error("Error sending delivered notification:", error);
+    } finally {
+      await change.after.ref.update({ notifyDonor: false });
+    }
+
+    return null;
+  });
+
+exports.manualNotifyDonor = onRequest(
+  { region: "us-central1" },
+  async (req, res) => {
+    setCorsHeaders(req, res);
+
+    if (req.method === "OPTIONS") {
+      res.status(204).send("");
+      return;
+    }
+
+    if (req.method !== "POST") {
+      res.status(405).send("Method Not Allowed");
+      return;
+    }
+
+    // ✅ Destructure FIRST before any type checks
+    const {
+      type,
+      userId,
+      donorId,
+      volunteerId,
+      title,
+      body,
+      topic,
+      eventId,
+      decision,
+      data: extraData,
+    } = req.body;
+
+    try {
+      // ─── Targeted notification to a specific user ──────────────────────────
+      if (type === "targeted") {
+        if (!userId) {
+          res.status(400).json({ error: "userId is required" });
+          return;
+        }
+
+        const recipient = await findRecipientDoc(userId);
+        if (!recipient) {
+          res.status(404).json({ error: `No user found for ${userId}` });
+          return;
+        }
+
+        const tokens = getTokens(recipient.snapshot.data());
+        if (!tokens.length) {
+          res.status(400).json({ error: "No FCM token found" });
+          return;
+        }
+
+        const response = await sendToTokens({
+          recipientRef: recipient.ref,
+          tokens,
+          title: title || "Notification",
+          body: body || "",
+          data: {
+            type: decision ? "event_decision" : type || "notification",
+            eventId: eventId || "",
+            decision: decision || "",
+          },
+        });
+
+        await recipient.ref.collection("notifications").add({
+          title: title || "Notification",
+          body: body || "",
+          eventId: eventId || "",
+          decision: decision || "",
+          isRead: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        res.status(200).json({ success: true, ...response });
+        return;
+      }
+
+      // ─── Topic broadcast (announcements) ──────────────────────────────────
+      if (type === "topic" && topic) {
+        await admin.messaging().send({
+          topic,
+          notification: { title: title || "Announcement", body: body || "" },
+          data: toFcmData(extraData),
+        });
+        res.status(200).json({ success: true, sent: "topic", topic });
+        return;
+      }
+
+      // ─── Notify a specific donor/volunteer by ID ───────────────────────────
+      const targetId = donorId || volunteerId;
+      if (!targetId) {
+        res.status(400).json({ error: "donorId, volunteerId, or topic is required" });
+        return;
+      }
+
+      const recipient = await findRecipientDoc(targetId);
+      const tokens = recipient ? getTokens(recipient.snapshot.data()) : [];
+
+      if (!tokens.length) {
+        res.status(400).json({ error: "No FCM token found for this user" });
+        return;
+      }
+
+      const response = await sendToTokens({
+        recipientRef: recipient.ref,
+        tokens,
+        title: title || "Notification",
+        body: body || "",
+        data: extraData,
+      });
+
+      console.log(`Notification sent to ${targetId}`);
+      res.status(200).json({
+        success: true,
+        sent: "token",
+        targetId,
+        successCount: response.successCount,
+        failureCount: response.failureCount,
+      });
+
+    } catch (error) {
+      console.error("Error sending notification:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+);
